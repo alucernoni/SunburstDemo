@@ -1,18 +1,18 @@
 """
 fetch_trades.py
 
-Pulls all congressional stock transactions from House + Senate Stock Watcher (S3).
+Loads congressional stock transactions from a local Kaggle CSV dataset.
+Source: "Congress Trading All" dataset (placed in pipeline/data/raw/).
 Parses amount ranges into numeric midpoints.
 Filters to politicians with 10+ purchase transactions (active traders).
 Outputs: data/trades.csv
 """
 
-import requests
-import pandas as pd
+import glob
 import os
+import pandas as pd
 
-HOUSE_URL = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
-SENATE_URL = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
+RAW_DATA_DIR = "pipeline/data/raw"
 
 # Agreed midpoints for disclosed amount ranges.
 # $1M+ open-ended cap: using $2,500,000 as midpoint (documented choice).
@@ -30,55 +30,42 @@ AMOUNT_MIDPOINTS = {
 
 MIN_PURCHASE_TRANSACTIONS = 10
 
+# Kaggle CSV column → our canonical column name
+COLUMN_MAP = {
+    "Name":           "politician",
+    "Party":          "party",
+    "Chamber":        "chamber",
+    "Ticker":         "ticker",
+    "Transaction":    "type",
+    "Traded":         "date",
+    "Trade_Size_USD": "amount_str",
+}
+
+
+def find_raw_csv(raw_dir: str) -> str:
+    """Returns path to the first CSV found in raw_dir, or raises if none found."""
+    csvs = glob.glob(os.path.join(raw_dir, "*.csv"))
+    if not csvs:
+        raise FileNotFoundError(
+            f"No CSV found in {raw_dir}. "
+            "Please download the Kaggle 'congress-trading-all' dataset and place it there."
+        )
+    return csvs[0]
+
+
+def load_raw(raw_dir: str) -> pd.DataFrame:
+    path = find_raw_csv(raw_dir)
+    print(f"  Loading {path}...")
+    df = pd.read_csv(path, usecols=list(COLUMN_MAP.keys()))
+    df = df.rename(columns=COLUMN_MAP)
+    return df
+
 
 def parse_amount(amount_str: str):
     """Return numeric midpoint for a disclosed amount range, or None if unrecognized."""
     if not isinstance(amount_str, str):
         return None
-    cleaned = amount_str.strip()
-    return AMOUNT_MIDPOINTS.get(cleaned, None)
-
-
-def fetch_house() -> pd.DataFrame:
-    print("Fetching House trades...")
-    resp = requests.get(HOUSE_URL, timeout=30)
-    resp.raise_for_status()
-    raw = resp.json()
-
-    rows = []
-    for t in raw:
-        rows.append({
-            "politician": t.get("representative", "").strip(),
-            "party":      t.get("party", "").strip(),
-            "chamber":    "House",
-            "ticker":     t.get("ticker", "").strip().upper(),
-            "type":       t.get("type", "").strip().lower(),
-            "date":       t.get("transaction_date", "").strip(),
-            "amount_str": t.get("amount", ""),
-        })
-
-    return pd.DataFrame(rows)
-
-
-def fetch_senate() -> pd.DataFrame:
-    print("Fetching Senate trades...")
-    resp = requests.get(SENATE_URL, timeout=30)
-    resp.raise_for_status()
-    raw = resp.json()
-
-    rows = []
-    for t in raw:
-        rows.append({
-            "politician": t.get("senator", "").strip(),
-            "party":      t.get("party", "").strip(),
-            "chamber":    "Senate",
-            "ticker":     t.get("ticker", "").strip().upper(),
-            "type":       t.get("type", "").strip().lower(),
-            "date":       t.get("transaction_date", "").strip(),
-            "amount_str": t.get("amount", ""),
-        })
-
-    return pd.DataFrame(rows)
+    return AMOUNT_MIDPOINTS.get(amount_str.strip(), None)
 
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
@@ -87,17 +74,20 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
 
     # Drop rows with no usable amount or ticker
     df = df[df["amount_mid"].notna()].copy()
+    df = df[df["ticker"].notna()].copy()
     df = df[df["ticker"].str.len() > 0].copy()
-
-    # Drop non-stock rows (options, bonds, etc. often have no clean ticker)
     df = df[~df["ticker"].isin(["", "--", "N/A"])].copy()
 
-    # Normalize transaction type
-    df["type"] = df["type"].str.lower()
+    # Normalize transaction type to lowercase
+    df["type"] = df["type"].str.strip().str.lower()
 
-    # Parse date
+    # Parse date (Kaggle format: "Monday, March 11, 2024")
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df[df["date"].notna()].copy()
+
+    # Normalize party and chamber
+    df["party"]   = df["party"].str.strip()
+    df["chamber"] = df["chamber"].str.strip()
 
     return df
 
@@ -115,13 +105,10 @@ def filter_active_traders(df: pd.DataFrame) -> pd.DataFrame:
 def main():
     os.makedirs("data", exist_ok=True)
 
-    house = fetch_house()
-    senate = fetch_senate()
-    combined = pd.concat([house, senate], ignore_index=True)
+    df = load_raw(RAW_DATA_DIR)
+    print(f"  Raw rows: {len(df)}")
 
-    print(f"  Raw rows: {len(combined)}")
-
-    cleaned = clean(combined)
+    cleaned = clean(df)
     print(f"  After cleaning: {len(cleaned)}")
 
     active = filter_active_traders(cleaned)
