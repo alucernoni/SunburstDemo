@@ -1,11 +1,52 @@
 import { useRef, useEffect } from "react";
 import * as d3 from "d3";
-import type { HierarchyData } from "./types";
+import type { HierarchyData, PoliticianNode } from "./types";
 
 interface SunburstProps {
   data: HierarchyData;
   width?: number;
   height?: number;
+}
+
+// Party colors for the inner ring
+const PARTY_COLORS: Record<string, string> = {
+  Democratic:  "#3B82F6", // blue
+  Republican:  "#EF4444", // red
+  Independent: "#A855F7", // purple
+  Other:       "#6B7280", // gray
+};
+
+// Diverging color scale for politician alpha:
+// red (underperformed) → gray (matched SPY) → green (outperformed)
+const alphaColor = d3
+  .scaleLinear<string>()
+  .domain([-0.3, 0, 0.3])
+  .clamp(true)
+  .range(["#EF4444", "#6B7280", "#22C55E"]);
+
+function getArcColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  if (d.depth === 1) {
+    // Party ring — use party color
+    const party = (d.data as { name: string }).name;
+    return PARTY_COLORS[party] ?? PARTY_COLORS["Other"];
+  }
+
+  if (d.depth === 2) {
+    // Politician ring — color by weighted alpha
+    const node = d.data as unknown as PoliticianNode;
+    if (node.weighted_alpha == null) return PARTY_COLORS["Other"];
+    return alphaColor(node.weighted_alpha);
+  }
+
+  // Ticker ring — inherit politician's alpha color at reduced opacity
+  const politicianNode = d.parent;
+  if (politicianNode) {
+    const node = politicianNode.data as unknown as PoliticianNode;
+    if (node.weighted_alpha != null) {
+      return d3.color(alphaColor(node.weighted_alpha))!.copy({ opacity: 0.6 }).formatRgb();
+    }
+  }
+  return "#4B5563";
 }
 
 export default function Sunburst({ data, width = 800, height = 800 }: SunburstProps) {
@@ -14,7 +55,6 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
   useEffect(() => {
     if (!svgRef.current) return;
 
-    // D3 owns the SVG DOM — clear on each render
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
@@ -47,8 +87,8 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
       .data(partitionRoot.descendants().filter((d) => d.depth > 0))
       .join("path")
       .attr("d", (d) => arc(d) ?? "")
-      .attr("fill", "#ccc")
-      .attr("stroke", "#fff")
+      .attr("fill", (d) => getArcColor(d))
+      .attr("stroke", "#111")
       .attr("stroke-width", 0.5);
 
   }, [data, width, height]);
