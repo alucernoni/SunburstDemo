@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Data (generated — not committed)
+data/
+
+# OS
+.DS_Store
