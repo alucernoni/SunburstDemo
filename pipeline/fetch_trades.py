@@ -56,7 +56,7 @@ def find_raw_csv(raw_dir: str) -> str:
 def load_raw(raw_dir: str) -> pd.DataFrame:
     path = find_raw_csv(raw_dir)
     print(f"  Loading {path}...")
-    df = pd.read_csv(path, usecols=list(COLUMN_MAP.keys()))
+    df = pd.read_csv(path, usecols=list(COLUMN_MAP.keys()), encoding="latin-1")
     df = df.rename(columns=COLUMN_MAP)
     return df
 
@@ -78,12 +78,25 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["ticker"].str.len() > 0].copy()
     df = df[~df["ticker"].isin(["", "--", "N/A"])].copy()
 
+    # Keep only valid equity tickers: 1-5 uppercase letters only
+    # Filters out bond CUSIPs (e.g. 912796WX3), options, and other non-equity instruments
+    df = df[df["ticker"].str.match(r"^[A-Z]{1,5}$")].copy()
+
     # Normalize transaction type to lowercase
     df["type"] = df["type"].str.strip().str.lower()
 
     # Parse date (Kaggle format: "Monday, March 11, 2024")
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df[df["date"].notna()].copy()
+
+    # Normalize politician names — strip honorifics that appear inconsistently in the dataset
+    honorifics = r"\b(Dr|Hon|Mr|Mrs|Ms|Jr|Sr|II|III|IV)\b\.?\s*"
+    df["politician"] = (
+        df["politician"]
+        .str.replace(honorifics, " ", regex=True)
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
 
     # Normalize party and chamber
     df["party"]   = df["party"].str.strip()

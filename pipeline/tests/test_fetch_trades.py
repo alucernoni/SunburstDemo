@@ -129,6 +129,26 @@ class TestClean:
         df = clean(make_raw_df({"type": ["Purchase", "SALE"]}))
         assert list(df["type"]) == ["purchase", "sale"]
 
+    def test_honorifics_stripped_from_politician_names(self):
+        raw = make_raw_df({"politician": ["Mark Dr Green", "Dr. Jane Smith"]})
+        df = clean(raw)
+        assert list(df["politician"]) == ["Mark Green", "Jane Smith"]
+
+    def test_duplicate_names_after_honorific_strip_merge_correctly(self):
+        # "Mark Dr Green" and "Mark Green" should become the same politician
+        rows = {
+            "politician": ["Mark Dr Green"] * 10 + ["Mark Green"] * 5,
+            "party":      ["R"] * 15,
+            "chamber":    ["House"] * 15,
+            "ticker":     ["AAPL"] * 15,
+            "type":       ["purchase"] * 15,
+            "date":       ["2023-01-15"] * 15,
+            "amount_str": ["$15,001 - $50,000"] * 15,
+        }
+        df = clean(pd.DataFrame(rows))
+        assert df["politician"].nunique() == 1
+        assert df["politician"].iloc[0] == "Mark Green"
+
 
 # ---------------------------------------------------------------------------
 # filter_active_traders
