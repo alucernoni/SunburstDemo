@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Sunburst from "./Sunburst";
+import Legend from "./Legend";
 import type { HierarchyData, PoliticianNode, TickerNode } from "./types";
 
 const SLIDER_MIN  = -0.4;
 const SLIDER_MAX  =  0.4;
 const SLIDER_STEP =  0.01;
+const MAX_SIZE    =  800;
 
 function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
   return {
@@ -27,14 +29,11 @@ function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyD
       ...party,
       children: (party.children as PoliticianNode[]).map((politician) => {
         if (!expanded.has(politician.name)) return politician;
-
-        // Replace children with full ticker list (visible + collapsed_tickers)
         const visibleTickers = politician.children.filter((t) => !t.collapsed);
         const othersNode     = politician.children.find((t) => t.collapsed);
         const allTickers: TickerNode[] = othersNode
           ? [...visibleTickers, ...(othersNode.collapsed_tickers ?? [])]
           : visibleTickers;
-
         return { ...politician, children: allTickers };
       }),
     })),
@@ -46,6 +45,19 @@ export default function App() {
   const [error,    setError]    = useState<string | null>(null);
   const [minAlpha, setMinAlpha] = useState(SLIDER_MIN);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [chartSize, setChartSize] = useState(MAX_SIZE);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Responsive sizing
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? MAX_SIZE;
+      setChartSize(Math.min(Math.floor(width), MAX_SIZE));
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     fetch("/hierarchy.json")
@@ -68,18 +80,18 @@ export default function App() {
 
   const displayData = useMemo(() => {
     if (!data) return null;
-    const filtered = filterByAlpha(data, minAlpha);
-    return applyExpansions(filtered, expanded);
+    return applyExpansions(filterByAlpha(data, minAlpha), expanded);
   }, [data, minAlpha, expanded]);
 
-  if (error)       return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
-  if (!displayData) return <div style={{ padding: 24 }}>Loading...</div>;
+  if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
 
   const alphaLabel   = `${minAlpha >= 0 ? "+" : ""}${(minAlpha * 100).toFixed(0)}%`;
-  const visibleCount = displayData.children.reduce((sum, p) => sum + p.children.length, 0);
+  const visibleCount = displayData?.children.reduce((sum, p) => sum + p.children.length, 0) ?? 0;
 
   return (
-    <main style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 24, gap: 16 }}>
+    <main className="app-layout">
+      <h1 className="app-title">Congressional Stock Trading</h1>
+
       <div className="slider-container">
         <label className="slider-label">
           Min Alpha vs SPY
@@ -98,13 +110,25 @@ export default function App() {
         />
         <span className="slider-count">{visibleCount} politicians</span>
       </div>
-      <Sunburst
-        data={displayData}
-        width={800}
-        height={800}
-        expandedPoliticians={expanded}
-        onCollapsedClick={handleCollapsedClick}
-      />
+
+      <div ref={containerRef} className="chart-container">
+        {!displayData ? (
+          <div className="spinner-wrapper">
+            <div className="spinner" />
+            <span>Loading trading data...</span>
+          </div>
+        ) : (
+          <Sunburst
+            data={displayData}
+            width={chartSize}
+            height={chartSize}
+            expandedPoliticians={expanded}
+            onCollapsedClick={handleCollapsedClick}
+          />
+        )}
+      </div>
+
+      <Legend />
     </main>
   );
 }
