@@ -4,6 +4,7 @@ import type { HierarchyData, PoliticianNode, TickerNode } from "./types";
 
 interface SunburstProps {
   data: HierarchyData;
+  totalPoliticians: number;
   width?: number;
   height?: number;
   expandedPoliticians?: Set<string>;
@@ -91,6 +92,44 @@ function isCollapsed(d: d3.HierarchyRectangularNode<HierarchyData>): boolean {
   return d.depth === 3 && !!(d.data as unknown as TickerNode).collapsed;
 }
 
+// Minimum angle (radians) guaranteed to each party ring segment
+const MIN_PARTY_ARC = (12 * Math.PI) / 180; // 12°
+
+function rescaleSubtree(
+  node: d3.HierarchyRectangularNode<HierarchyData>,
+  newX0: number,
+  newX1: number
+): void {
+  const oldSpan = node.x1 - node.x0;
+  const newSpan = newX1 - newX0;
+  if (node.children && oldSpan > 0) {
+    for (const child of node.children) {
+      rescaleSubtree(
+        child,
+        newX0 + ((child.x0 - node.x0) / oldSpan) * newSpan,
+        newX0 + ((child.x1 - node.x0) / oldSpan) * newSpan
+      );
+    }
+  }
+  node.x0 = newX0;
+  node.x1 = newX1;
+}
+
+function enforceMinPartyArcs(root: d3.HierarchyRectangularNode<HierarchyData>): void {
+  const parties = root.children;
+  if (!parties || parties.length === 0) return;
+  const total = 2 * Math.PI;
+  const totalValue = root.value ?? 1;
+  const floored = parties.map((d) => Math.max((d.value ?? 0) / totalValue * total, MIN_PARTY_ARC));
+  const scale = total / floored.reduce((s, a) => s + a, 0);
+  let cursor = 0;
+  for (let i = 0; i < parties.length; i++) {
+    const arcSize = floored[i] * scale;
+    rescaleSubtree(parties[i], cursor, cursor + arcSize);
+    cursor += arcSize;
+  }
+}
+
 // Minimum arc length (px) at midpoint radius required to show a label
 const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 40, 3: 22 };
 
@@ -126,22 +165,33 @@ function getLabelColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return d.depth === 1 ? "#fff" : "rgba(0,0,0,0.75)";
 }
 
-export default function Sunburst({ data, width = 800, height = 800, expandedPoliticians, onCollapsedClick }: SunburstProps) {
-  const svgRef     = useRef<SVGSVGElement>(null);
-  const gRef       = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
-  const tooltipRef = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
-  const prevAngles = useRef<Map<string, ArcAngles>>(new Map());
+export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, onCollapsedClick }: SunburstProps) {
+  const svgRef      = useRef<SVGSVGElement>(null);
+  const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const tooltipRef  = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
+  const centerRef   = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const prevAngles  = useRef<Map<string, ArcAngles>>(new Map());
 
   // One-time setup: create the <g> and tooltip
   useEffect(() => {
     if (!svgRef.current) return;
     gRef.current = d3.select(svgRef.current).append("g");
+    const cg = gRef.current.append("g").attr("class", "center-label").attr("pointer-events", "none");
+    cg.append("text").attr("class", "center-count").attr("text-anchor", "middle");
+    cg.append("text").attr("class", "center-sub").attr("text-anchor", "middle");
+    centerRef.current = cg;
     tooltipRef.current = d3
       .select("body")
       .append("div")
       .attr("class", "sunburst-tooltip")
       .style("opacity", 0);
-    return () => { tooltipRef.current?.remove(); };
+    return () => {
+      tooltipRef.current?.remove();
+      tooltipRef.current = null;
+      gRef.current?.remove();
+      gRef.current = null;
+      centerRef.current = null;
+    };
   }, []);
 
   // Data update: runs whenever data, dimensions, or click handler changes
@@ -170,6 +220,7 @@ export default function Sunburst({ data, width = 800, height = 800, expandedPoli
       .innerRadius((d) => d.y0)
       .outerRadius((d) => d.y1 - 1);
 
+    enforceMinPartyArcs(partitionRoot);
     const nodes = partitionRoot.descendants().filter((d) => d.depth > 0);
 
     gRef.current
@@ -244,12 +295,13 @@ export default function Sunburst({ data, width = 800, height = 800, expandedPoli
     );
 
     gRef.current
-      .selectAll<SVGTextElement, d3.HierarchyRectangularNode<HierarchyData>>("text")
+      .selectAll<SVGTextElement, d3.HierarchyRectangularNode<HierarchyData>>("text.arc-label")
       .data(labelNodes, nodeKey)
       .join(
         (enter) =>
           enter
             .append("text")
+            .attr("class", "arc-label")
             .attr("transform", getLabelTransform)
             .attr("text-anchor", "middle")
             .attr("dominant-baseline", "middle")
@@ -269,6 +321,25 @@ export default function Sunburst({ data, width = 800, height = 800, expandedPoli
         (exit) =>
           exit.transition().duration(300).style("opacity", 0).remove()
       );
+
+    // Center label — count of visible politicians (update in place, no remove/reappend)
+    if (centerRef.current) {
+      const activeCount = nodes.filter((d) => d.depth === 2).length;
+      const innerRadius = radius / (partitionRoot.height + 1);
+      const countFontSize = Math.min(Math.round(innerRadius * 0.55), 28);
+      centerRef.current.select(".center-count")
+        .attr("dy", "-0.25em")
+        .attr("font-size", countFontSize)
+        .attr("font-weight", "700")
+        .attr("fill", "#f3f4f6")
+        .text(`${activeCount} / ${totalPoliticians}`);
+      centerRef.current.select(".center-sub")
+        .attr("dy", "1.1em")
+        .attr("font-size", Math.max(9, Math.round(countFontSize * 0.38)))
+        .attr("letter-spacing", "0.05em")
+        .attr("fill", "#6b7280")
+        .text("active traders");
+    }
 
   }, [data, width, height, expandedPoliticians, onCollapsedClick]);
 

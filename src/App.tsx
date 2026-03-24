@@ -102,8 +102,9 @@ export default function App() {
 
   if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
 
-  const alphaLabel   = `${minAlpha >= 0 ? "+" : ""}${(minAlpha * 100).toFixed(0)}%`;
-  const visibleCount = displayData?.children.reduce((sum, p) => sum + p.children.length, 0) ?? 0;
+  const alphaLabel        = `${minAlpha >= 0 ? "+" : ""}${(minAlpha * 100).toFixed(0)}%`;
+  const visibleCount      = displayData?.children.reduce((sum, p) => sum + p.children.length, 0) ?? 0;
+  const totalPoliticians  = data?.children.reduce((sum, p) => sum + p.children.length, 0) ?? 0;
 
   return (
     <main className="app-layout">
@@ -157,6 +158,7 @@ export default function App() {
             ) : (
               <Sunburst
                 data={displayData}
+                totalPoliticians={totalPoliticians}
                 width={chartSize}
                 height={chartSize}
                 expandedPoliticians={expanded}
