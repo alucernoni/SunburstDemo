@@ -54,12 +54,13 @@ function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyD
 }
 
 export default function App() {
-  const [data,      setData]      = useState<HierarchyData | null>(null);
-  const [error,     setError]     = useState<string | null>(null);
-  const [minAlpha,     setMinAlpha]     = useState(SLIDER_MIN);
-  const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
-  const [currentOnly,  setCurrentOnly]  = useState(false);
-  const [chartSize, setChartSize] = useState(MAX_SIZE);
+  const [data,         setData]        = useState<HierarchyData | null>(null);
+  const [error,        setError]       = useState<string | null>(null);
+  const [minAlpha,     setMinAlpha]    = useState(SLIDER_MIN);
+  const [expanded,     setExpanded]    = useState<Set<string>>(new Set());
+  const [currentOnly,  setCurrentOnly] = useState(false);
+  const [zoomedParty,  setZoomedParty] = useState<string | null>(null);
+  const [chartSize,    setChartSize]   = useState(MAX_SIZE);
   const chartAreaRef = useRef<HTMLDivElement>(null);
 
   // Size chart to fit the available square in the content row
@@ -163,6 +164,8 @@ export default function App() {
                 height={chartSize}
                 expandedPoliticians={expanded}
                 onCollapsedClick={handleCollapsedClick}
+                zoomedParty={zoomedParty}
+                onPartyClick={setZoomedParty}
               />
             )}
           </div>

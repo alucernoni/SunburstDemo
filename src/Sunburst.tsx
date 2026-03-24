@@ -9,6 +9,8 @@ interface SunburstProps {
   height?: number;
   expandedPoliticians?: Set<string>;
   onCollapsedClick?: (politicianName: string) => void;
+  zoomedParty?: string | null;
+  onPartyClick?: (party: string | null) => void;
 }
 
 const PARTY_COLORS: Record<string, string> = {
@@ -130,6 +132,16 @@ function enforceMinPartyArcs(root: d3.HierarchyRectangularNode<HierarchyData>): 
   }
 }
 
+function applyZoom(
+  root: d3.HierarchyRectangularNode<HierarchyData>,
+  partyName: string
+): d3.HierarchyRectangularNode<HierarchyData>[] {
+  const party = root.children?.find((d) => d.data.name === partyName);
+  if (!party) return root.descendants().filter((d) => d.depth > 0);
+  rescaleSubtree(party, 0, 2 * Math.PI);
+  return party.descendants();
+}
+
 // Minimum arc length (px) at midpoint radius required to show a label
 const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 40, 3: 22 };
 
@@ -165,7 +177,7 @@ function getLabelColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return d.depth === 1 ? "#fff" : "rgba(0,0,0,0.75)";
 }
 
-export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, onCollapsedClick }: SunburstProps) {
+export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, onCollapsedClick, zoomedParty, onPartyClick }: SunburstProps) {
   const svgRef      = useRef<SVGSVGElement>(null);
   const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const tooltipRef  = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
@@ -221,7 +233,9 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       .outerRadius((d) => d.y1 - 1);
 
     enforceMinPartyArcs(partitionRoot);
-    const nodes = partitionRoot.descendants().filter((d) => d.depth > 0);
+    const nodes = zoomedParty
+      ? applyZoom(partitionRoot, zoomedParty)
+      : partitionRoot.descendants().filter((d) => d.depth > 0);
 
     gRef.current
       .selectAll<SVGPathElement, d3.HierarchyRectangularNode<HierarchyData>>("path")
@@ -260,6 +274,11 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           exit.transition().duration(300).style("opacity", 0).remove()
       )
       .on("click", (_event: MouseEvent, d) => {
+        if (d.depth === 1) {
+          const partyName = (d.data as { name: string }).name;
+          onPartyClick?.(zoomedParty === partyName ? null : partyName);
+          return;
+        }
         if (!onCollapsedClick) return;
         if (isCollapsed(d)) {
           // "N others" clicked — expand
@@ -341,7 +360,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         .text("active traders");
     }
 
-  }, [data, width, height, expandedPoliticians, onCollapsedClick]);
+  }, [data, width, height, expandedPoliticians, onCollapsedClick, zoomedParty, onPartyClick]);
 
   return <svg ref={svgRef} />;
 }
