@@ -29,6 +29,11 @@ const formatVolume = (v: number) =>
 const formatAlpha = (a: number | null) =>
   a == null ? "N/A" : `${a >= 0 ? "+" : ""}${(a * 100).toFixed(1)}%`;
 
+// Stable key for each arc node — used by D3 join to track nodes across updates
+function nodeKey(d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  return d.ancestors().map((n) => n.data.name).reverse().join("/");
+}
+
 function getArcColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 1) {
     const party = (d.data as { name: string }).name;
@@ -39,12 +44,9 @@ function getArcColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
     if (node.weighted_alpha == null) return PARTY_COLORS["Other"];
     return alphaColor(node.weighted_alpha);
   }
-  const politicianNode = d.parent;
-  if (politicianNode) {
-    const node = politicianNode.data as unknown as PoliticianNode;
-    if (node.weighted_alpha != null) {
-      return d3.color(alphaColor(node.weighted_alpha))!.copy({ opacity: 0.6 }).formatRgb();
-    }
+  const node = d.parent?.data as unknown as PoliticianNode;
+  if (node?.weighted_alpha != null) {
+    return d3.color(alphaColor(node.weighted_alpha))!.copy({ opacity: 0.6 }).formatRgb();
   }
   return "#4B5563";
 }
@@ -52,61 +54,64 @@ function getArcColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
 function getTooltipHtml(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 1) {
     const party = (d.data as { name: string }).name;
-    const politicianCount = d.children?.length ?? 0;
-    const totalVolume = d.value ?? 0;
     return `
       <div class="tt-title">${party}</div>
-      <div class="tt-row"><span>Politicians</span><span>${politicianCount}</span></div>
-      <div class="tt-row"><span>Total Volume</span><span>${formatVolume(totalVolume)}</span></div>
+      <div class="tt-row"><span>Politicians</span><span>${d.children?.length ?? 0}</span></div>
+      <div class="tt-row"><span>Total Volume</span><span>${formatVolume(d.value ?? 0)}</span></div>
     `;
   }
   if (d.depth === 2) {
     const node = d.data as unknown as PoliticianNode;
     const alpha = node.weighted_alpha;
-    const alphaStr = formatAlpha(alpha);
-    const alphaClass = alpha == null ? "" : alpha >= 0 ? "positive" : "negative";
+    const cls = alpha == null ? "" : alpha >= 0 ? "positive" : "negative";
     return `
       <div class="tt-title">${node.name}</div>
-      <div class="tt-row"><span>Alpha vs SPY</span><span class="${alphaClass}">${alphaStr}</span></div>
+      <div class="tt-row"><span>Alpha vs SPY</span><span class="${cls}">${formatAlpha(alpha)}</span></div>
       <div class="tt-row"><span>Total Volume</span><span>${formatVolume(node.total_volume)}</span></div>
       <div class="tt-row"><span>Trades</span><span>${node.trade_count}</span></div>
     `;
   }
   if (d.depth === 3) {
     const node = d.data as unknown as TickerNode;
-    const politicianNode = d.parent?.data as unknown as PoliticianNode;
+    const politician = d.parent?.data as unknown as PoliticianNode;
     return `
       <div class="tt-title">${node.name}</div>
       <div class="tt-row"><span>Volume</span><span>${formatVolume(node.value)}</span></div>
-      ${politicianNode ? `<div class="tt-row"><span>Trader</span><span>${politicianNode.name}</span></div>` : ""}
+      ${politician ? `<div class="tt-row"><span>Trader</span><span>${politician.name}</span></div>` : ""}
     `;
   }
   return "";
 }
 
-export default function Sunburst({ data, width = 800, height = 800 }: SunburstProps) {
-  const svgRef = useRef<SVGSVGElement>(null);
+type ArcAngles = { x0: number; x1: number; y0: number; y1: number };
 
+export default function Sunburst({ data, width = 800, height = 800 }: SunburstProps) {
+  const svgRef     = useRef<SVGSVGElement>(null);
+  const gRef       = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const tooltipRef = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
+  const prevAngles = useRef<Map<string, ArcAngles>>(new Map());
+
+  // One-time setup: create the <g> and tooltip
   useEffect(() => {
     if (!svgRef.current) return;
-
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
-
-    const radius = Math.min(width, height) / 2;
-
-    const g = svg
-      .attr("width", width)
-      .attr("height", height)
-      .append("g")
-      .attr("transform", `translate(${width / 2}, ${height / 2})`);
-
-    // Tooltip div — appended to body so it floats above everything
-    const tooltip = d3
+    gRef.current = d3.select(svgRef.current).append("g");
+    tooltipRef.current = d3
       .select("body")
       .append("div")
       .attr("class", "sunburst-tooltip")
       .style("opacity", 0);
+    return () => { tooltipRef.current?.remove(); };
+  }, []);
+
+  // Data update: runs whenever data or dimensions change
+  useEffect(() => {
+    if (!svgRef.current || !gRef.current || !tooltipRef.current) return;
+
+    const tooltip = tooltipRef.current;
+    const radius  = Math.min(width, height) / 2;
+
+    d3.select(svgRef.current).attr("width", width).attr("height", height);
+    gRef.current.attr("transform", `translate(${width / 2}, ${height / 2})`);
 
     const partitionRoot = d3
       .partition<HierarchyData>()
@@ -118,27 +123,51 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
       );
 
     const arc = d3
-      .arc<d3.HierarchyRectangularNode<HierarchyData>>()
+      .arc<ArcAngles>()
       .startAngle((d) => d.x0)
       .endAngle((d) => d.x1)
       .innerRadius((d) => d.y0)
       .outerRadius((d) => d.y1 - 1);
 
-    g.selectAll("path")
-      .data(partitionRoot.descendants().filter((d) => d.depth > 0))
-      .join("path")
-      .attr("d", (d) => arc(d) ?? "")
-      .attr("fill", (d) => getArcColor(d))
-      .attr("stroke", "#111")
-      .attr("stroke-width", 0.5)
-      .style("cursor", "pointer")
+    const nodes = partitionRoot.descendants().filter((d) => d.depth > 0);
+
+    gRef.current
+      .selectAll<SVGPathElement, d3.HierarchyRectangularNode<HierarchyData>>("path")
+      .data(nodes, nodeKey)
+      .join(
+        (enter) =>
+          enter
+            .append("path")
+            .attr("fill", getArcColor)
+            .attr("stroke", "#111")
+            .attr("stroke-width", 0.5)
+            .style("cursor", "pointer")
+            .each(function (d) {
+              // Store initial angles so first render has no tween artifact
+              prevAngles.current.set(nodeKey(d), { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 });
+            })
+            .attr("d", (d) => arc(d) ?? ""),
+        (update) =>
+          update
+            .attr("fill", getArcColor)
+            .transition()
+            .duration(600)
+            .attrTween("d", function (d) {
+              const key  = nodeKey(d);
+              const prev = prevAngles.current.get(key) ?? { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
+              const next = { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
+              const interp = d3.interpolateObject(prev, next);
+              prevAngles.current.set(key, next);
+              return (t: number) => arc(interp(t)) ?? "";
+            }),
+        (exit) =>
+          exit.transition().duration(300).style("opacity", 0).remove()
+      )
       .on("mouseover", (event: MouseEvent, d) => {
         d3.select(event.currentTarget as Element)
           .attr("stroke", "#fff")
           .attr("stroke-width", 1.5);
-        tooltip
-          .html(getTooltipHtml(d))
-          .style("opacity", 1);
+        tooltip.html(getTooltipHtml(d)).style("opacity", 1);
       })
       .on("mousemove", (event: MouseEvent) => {
         tooltip
@@ -152,8 +181,6 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
         tooltip.style("opacity", 0);
       });
 
-    // Cleanup tooltip on unmount
-    return () => { tooltip.remove(); };
   }, [data, width, height]);
 
   return <svg ref={svgRef} />;
