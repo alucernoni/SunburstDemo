@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Sunburst from "./Sunburst";
-import type { HierarchyData, PoliticianNode } from "./types";
+import type { HierarchyData, PoliticianNode, TickerNode } from "./types";
 
-const SLIDER_MIN = -0.4;
-const SLIDER_MAX =  0.4;
-const SLIDER_STEP = 0.01;
+const SLIDER_MIN  = -0.4;
+const SLIDER_MAX  =  0.4;
+const SLIDER_STEP =  0.01;
 
 function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
   return {
@@ -20,10 +20,32 @@ function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
   };
 }
 
+function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyData {
+  return {
+    ...data,
+    children: data.children.map((party) => ({
+      ...party,
+      children: (party.children as PoliticianNode[]).map((politician) => {
+        if (!expanded.has(politician.name)) return politician;
+
+        // Replace children with full ticker list (visible + collapsed_tickers)
+        const visibleTickers = politician.children.filter((t) => !t.collapsed);
+        const othersNode     = politician.children.find((t) => t.collapsed);
+        const allTickers: TickerNode[] = othersNode
+          ? [...visibleTickers, ...(othersNode.collapsed_tickers ?? [])]
+          : visibleTickers;
+
+        return { ...politician, children: allTickers };
+      }),
+    })),
+  };
+}
+
 export default function App() {
   const [data,     setData]     = useState<HierarchyData | null>(null);
   const [error,    setError]    = useState<string | null>(null);
   const [minAlpha, setMinAlpha] = useState(SLIDER_MIN);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/hierarchy.json")
@@ -35,18 +57,26 @@ export default function App() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  const filteredData = useMemo(
-    () => (data ? filterByAlpha(data, minAlpha) : null),
-    [data, minAlpha]
-  );
+  const handleCollapsedClick = useCallback((politicianName: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(politicianName)) next.delete(politicianName);
+      else next.add(politicianName);
+      return next;
+    });
+  }, []);
 
-  if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
-  if (!filteredData) return <div style={{ padding: 24 }}>Loading...</div>;
+  const displayData = useMemo(() => {
+    if (!data) return null;
+    const filtered = filterByAlpha(data, minAlpha);
+    return applyExpansions(filtered, expanded);
+  }, [data, minAlpha, expanded]);
 
-  const alphaLabel = `${minAlpha >= 0 ? "+" : ""}${(minAlpha * 100).toFixed(0)}%`;
-  const visibleCount = filteredData.children.reduce(
-    (sum, party) => sum + party.children.length, 0
-  );
+  if (error)       return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
+  if (!displayData) return <div style={{ padding: 24 }}>Loading...</div>;
+
+  const alphaLabel   = `${minAlpha >= 0 ? "+" : ""}${(minAlpha * 100).toFixed(0)}%`;
+  const visibleCount = displayData.children.reduce((sum, p) => sum + p.children.length, 0);
 
   return (
     <main style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 24, gap: 16 }}>
@@ -68,7 +98,13 @@ export default function App() {
         />
         <span className="slider-count">{visibleCount} politicians</span>
       </div>
-      <Sunburst data={filteredData} width={800} height={800} />
+      <Sunburst
+        data={displayData}
+        width={800}
+        height={800}
+        expandedPoliticians={expanded}
+        onCollapsedClick={handleCollapsedClick}
+      />
     </main>
   );
 }

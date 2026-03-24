@@ -6,6 +6,8 @@ interface SunburstProps {
   data: HierarchyData;
   width?: number;
   height?: number;
+  expandedPoliticians?: Set<string>;
+  onCollapsedClick?: (politicianName: string) => void;
 }
 
 const PARTY_COLORS: Record<string, string> = {
@@ -85,7 +87,11 @@ function getTooltipHtml(d: d3.HierarchyRectangularNode<HierarchyData>): string {
 
 type ArcAngles = { x0: number; x1: number; y0: number; y1: number };
 
-export default function Sunburst({ data, width = 800, height = 800 }: SunburstProps) {
+function isCollapsed(d: d3.HierarchyRectangularNode<HierarchyData>): boolean {
+  return d.depth === 3 && !!(d.data as unknown as TickerNode).collapsed;
+}
+
+export default function Sunburst({ data, width = 800, height = 800, expandedPoliticians, onCollapsedClick }: SunburstProps) {
   const svgRef     = useRef<SVGSVGElement>(null);
   const gRef       = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const tooltipRef = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
@@ -103,7 +109,7 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
     return () => { tooltipRef.current?.remove(); };
   }, []);
 
-  // Data update: runs whenever data or dimensions change
+  // Data update: runs whenever data, dimensions, or click handler changes
   useEffect(() => {
     if (!svgRef.current || !gRef.current || !tooltipRef.current) return;
 
@@ -139,8 +145,9 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
           enter
             .append("path")
             .attr("fill", getArcColor)
-            .attr("stroke", "#111")
-            .attr("stroke-width", 0.5)
+            .attr("stroke", (d) => isCollapsed(d) ? "#fff" : "#111")
+            .attr("stroke-width", (d) => isCollapsed(d) ? 1.5 : 0.5)
+            .attr("stroke-dasharray", (d) => isCollapsed(d) ? "3,2" : "none")
             .style("cursor", "pointer")
             .each(function (d) {
               // Store initial angles so first render has no tween artifact
@@ -150,6 +157,9 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
         (update) =>
           update
             .attr("fill", getArcColor)
+            .attr("stroke", (d) => isCollapsed(d) ? "#fff" : "#111")
+            .attr("stroke-width", (d) => isCollapsed(d) ? 1.5 : 0.5)
+            .attr("stroke-dasharray", (d) => isCollapsed(d) ? "3,2" : "none")
             .transition()
             .duration(600)
             .attrTween("d", function (d) {
@@ -163,6 +173,18 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
         (exit) =>
           exit.transition().duration(300).style("opacity", 0).remove()
       )
+      .on("click", (_event: MouseEvent, d) => {
+        if (!onCollapsedClick) return;
+        if (isCollapsed(d)) {
+          // "N others" clicked — expand
+          const politicianName = (d.parent?.data as unknown as PoliticianNode)?.name;
+          if (politicianName) onCollapsedClick(politicianName);
+        } else if (d.depth === 2) {
+          // Politician arc clicked — collapse if currently expanded
+          const politicianName = (d.data as unknown as PoliticianNode).name;
+          if (expandedPoliticians?.has(politicianName)) onCollapsedClick(politicianName);
+        }
+      })
       .on("mouseover", (event: MouseEvent, d) => {
         d3.select(event.currentTarget as Element)
           .attr("stroke", "#fff")
@@ -181,7 +203,7 @@ export default function Sunburst({ data, width = 800, height = 800 }: SunburstPr
         tooltip.style("opacity", 0);
       });
 
-  }, [data, width, height]);
+  }, [data, width, height, expandedPoliticians, onCollapsedClick]);
 
   return <svg ref={svgRef} />;
 }
