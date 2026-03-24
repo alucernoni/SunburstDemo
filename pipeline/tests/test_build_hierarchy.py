@@ -109,22 +109,22 @@ class TestBuildPoliticianNode:
     def test_required_fields_present(self):
         row = make_alpha_row()
         trades = make_politician_trades()
-        node = build_politician_node("Alice", row, trades, min_fraction=0.0)
+        node = build_politician_node("Alice", row, trades, min_fraction=0.0, current_legislators=set())
         for field in ["name", "party_code", "weighted_alpha", "total_volume", "trade_count", "children"]:
             assert field in node
 
     def test_name_set_correctly(self):
-        node = build_politician_node("Alice", make_alpha_row(), make_politician_trades(), min_fraction=0.0)
+        node = build_politician_node("Alice", make_alpha_row(), make_politician_trades(), min_fraction=0.0, current_legislators=set())
         assert node["name"] == "Alice"
 
     def test_weighted_alpha_rounded(self):
         row = make_alpha_row(weighted_alpha=0.123456789)
-        node = build_politician_node("Alice", row, make_politician_trades(), min_fraction=0.0)
+        node = build_politician_node("Alice", row, make_politician_trades(), min_fraction=0.0, current_legislators=set())
         assert node["weighted_alpha"] == pytest.approx(0.1235, abs=1e-4)
 
     def test_nan_alpha_stored_as_none(self):
         row = make_alpha_row(weighted_alpha=np.nan)
-        node = build_politician_node("Alice", row, make_politician_trades(), min_fraction=0.0)
+        node = build_politician_node("Alice", row, make_politician_trades(), min_fraction=0.0, current_legislators=set())
         assert node["weighted_alpha"] is None
 
     def test_ticker_volumes_summed_across_all_trade_types(self):
@@ -132,12 +132,12 @@ class TestBuildPoliticianNode:
             {"politician": "Alice", "ticker": "AAPL", "amount_mid": 100_000, "type": "purchase"},
             {"politician": "Alice", "ticker": "AAPL", "amount_mid":  50_000, "type": "sale"},
         ])
-        node = build_politician_node("Alice", make_alpha_row(), trades, min_fraction=0.0)
+        node = build_politician_node("Alice", make_alpha_row(), trades, min_fraction=0.0, current_legislators=set())
         aapl = next(n for n in node["children"] if n["name"] == "AAPL")
         assert aapl["value"] == 150_000
 
     def test_json_serializable(self):
-        node = build_politician_node("Alice", make_alpha_row(), make_politician_trades(), min_fraction=0.0)
+        node = build_politician_node("Alice", make_alpha_row(), make_politician_trades(), min_fraction=0.0, current_legislators=set())
         json.dumps(node)  # should not raise
 
 
@@ -162,17 +162,17 @@ def make_multi_politician_trades():
 
 class TestBuildPartyNode:
     def test_party_name_set(self):
-        node = build_party_node("Democratic", make_alphas_df(), make_multi_politician_trades(), 0.0)
+        node = build_party_node("Democratic", make_alphas_df(), make_multi_politician_trades(), 0.0, set())
         assert node["name"] == "Democratic"
 
     def test_politicians_sorted_by_alpha_descending(self):
-        node = build_party_node("Democratic", make_alphas_df(), make_multi_politician_trades(), 0.0)
+        node = build_party_node("Democratic", make_alphas_df(), make_multi_politician_trades(), 0.0, set())
         names = [c["name"] for c in node["children"]]
         assert names[0] == "Alice"   # alpha=0.20
         assert names[1] == "Bob"     # alpha=0.05
 
     def test_nan_alpha_politicians_sorted_last(self):
-        node = build_party_node("Democratic", make_alphas_df(), make_multi_politician_trades(), 0.0)
+        node = build_party_node("Democratic", make_alphas_df(), make_multi_politician_trades(), 0.0, set())
         names = [c["name"] for c in node["children"]]
         assert names[-1] == "Carol"  # alpha=NaN
 
@@ -183,7 +183,7 @@ class TestBuildPartyNode:
             "politician": "Dave", "party": "Democratic",
             "weighted_alpha": 0.30, "total_volume": 100_000, "trade_count": 5
         }])], ignore_index=True)
-        node = build_party_node("Democratic", alphas, make_multi_politician_trades(), 0.0)
+        node = build_party_node("Democratic", alphas, make_multi_politician_trades(), 0.0, set())
         names = [c["name"] for c in node["children"]]
         assert "Dave" not in names
 
@@ -208,11 +208,11 @@ def make_full_trades():
 
 class TestBuildHierarchy:
     def test_root_name_is_congress(self):
-        h = build_hierarchy(make_full_alphas(), make_full_trades())
+        h = build_hierarchy(make_full_alphas(), make_full_trades(), set())
         assert h["name"] == "Congress"
 
     def test_parties_in_canonical_order(self):
-        h = build_hierarchy(make_full_alphas(), make_full_trades())
+        h = build_hierarchy(make_full_alphas(), make_full_trades(), set())
         party_names = [p["name"] for p in h["children"]]
         dem_idx = party_names.index("Democratic")
         rep_idx = party_names.index("Republican")
@@ -220,18 +220,25 @@ class TestBuildHierarchy:
 
     def test_empty_parties_excluded(self):
         # Only Democratic and Republican present — Independent/Other should not appear
-        h = build_hierarchy(make_full_alphas(), make_full_trades())
+        h = build_hierarchy(make_full_alphas(), make_full_trades(), set())
         party_names = [p["name"] for p in h["children"]]
         assert "Independent" not in party_names
         assert "Other" not in party_names
 
     def test_full_structure_is_json_serializable(self):
-        h = build_hierarchy(make_full_alphas(), make_full_trades())
+        h = build_hierarchy(make_full_alphas(), make_full_trades(), set())
         json.dumps(h)  # should not raise
 
     def test_leaf_nodes_have_value_field(self):
-        h = build_hierarchy(make_full_alphas(), make_full_trades())
+        h = build_hierarchy(make_full_alphas(), make_full_trades(), set())
         for party in h["children"]:
             for politician in party["children"]:
                 for ticker in politician["children"]:
                     assert "value" in ticker
+
+    def test_is_current_tagged_correctly(self):
+        current = {"alice"}  # lowercase match
+        h = build_hierarchy(make_full_alphas(), make_full_trades(), current)
+        politicians = {p["name"]: p for party in h["children"] for p in party["children"]}
+        assert politicians["Alice"]["is_current"] is True
+        assert politicians["Bob"]["is_current"] is False

@@ -16,6 +16,7 @@ export interface PoliticianNode {
   weighted_alpha: number | null;
   total_volume: number;
   trade_count: number;
+  is_current: boolean;
   children: TickerNode[];
 }
 

@@ -91,6 +91,41 @@ function isCollapsed(d: d3.HierarchyRectangularNode<HierarchyData>): boolean {
   return d.depth === 3 && !!(d.data as unknown as TickerNode).collapsed;
 }
 
+// Minimum arc length (px) at midpoint radius required to show a label
+const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 40, 3: 22 };
+
+function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  if (d.depth === 1) return (d.data as { name: string }).name;
+  if (d.depth === 2) {
+    const name = (d.data as unknown as PoliticianNode).name;
+    const parts = name.trim().split(/\s+/);
+    return parts[parts.length - 1] ?? name; // last name only
+  }
+  if (d.depth === 3) return (d.data as unknown as TickerNode).name;
+  return "";
+}
+
+function getLabelTransform(d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  const angle  = (d.x0 + d.x1) / 2;          // midpoint angle in radians
+  const r      = (d.y0 + d.y1) / 2;           // midpoint radius
+  const deg    = angle * 180 / Math.PI - 90;   // rotate to tangent, offset for SVG 0=right
+  const flip   = angle > Math.PI ? 180 : 0;    // keep text right-side up in lower half
+  return `rotate(${deg}) translate(${r}, 0) rotate(${flip})`;
+}
+
+function arcLength(d: d3.HierarchyRectangularNode<HierarchyData>): number {
+  return ((d.y0 + d.y1) / 2) * (d.x1 - d.x0);
+}
+
+function getLabelFontSize(d: d3.HierarchyRectangularNode<HierarchyData>): number {
+  return d.depth === 1 ? 11 : d.depth === 2 ? 9 : 8;
+}
+
+function getLabelColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  // Use white for party ring, dark for others to contrast with lighter arc fills
+  return d.depth === 1 ? "#fff" : "rgba(0,0,0,0.75)";
+}
+
 export default function Sunburst({ data, width = 800, height = 800, expandedPoliticians, onCollapsedClick }: SunburstProps) {
   const svgRef     = useRef<SVGSVGElement>(null);
   const gRef       = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
@@ -202,6 +237,38 @@ export default function Sunburst({ data, width = 800, height = 800, expandedPoli
           .attr("stroke-width", 0.5);
         tooltip.style("opacity", 0);
       });
+
+    // Labels
+    const labelNodes = nodes.filter(
+      (d) => arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999)
+    );
+
+    gRef.current
+      .selectAll<SVGTextElement, d3.HierarchyRectangularNode<HierarchyData>>("text")
+      .data(labelNodes, nodeKey)
+      .join(
+        (enter) =>
+          enter
+            .append("text")
+            .attr("transform", getLabelTransform)
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "middle")
+            .attr("font-size", getLabelFontSize)
+            .attr("fill", getLabelColor)
+            .attr("pointer-events", "none")
+            .style("user-select", "none")
+            .text(getLabelText),
+        (update) =>
+          update
+            .text(getLabelText)
+            .attr("font-size", getLabelFontSize)
+            .attr("fill", getLabelColor)
+            .transition()
+            .duration(600)
+            .attr("transform", getLabelTransform),
+        (exit) =>
+          exit.transition().duration(300).style("opacity", 0).remove()
+      );
 
   }, [data, width, height, expandedPoliticians, onCollapsedClick]);
 

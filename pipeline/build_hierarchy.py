@@ -18,9 +18,10 @@ import os
 import numpy as np
 import pandas as pd
 
-TRADES_PATH  = "data/trades.csv"
-ALPHAS_PATH  = "data/alphas.csv"
-OUTPUT_PATH  = "public/hierarchy.json"
+TRADES_PATH       = "data/trades.csv"
+ALPHAS_PATH       = "data/alphas.csv"
+OUTPUT_PATH       = "public/hierarchy.json"
+LEGISLATORS_PATH  = "pipeline/data/raw/legislators-current.csv"
 
 # Tickers representing < this fraction of a politician's total volume get collapsed.
 # Approximates the ~0.015 radian arc-width threshold; tune empirically after rendering.
@@ -28,6 +29,18 @@ MIN_TICKER_FRACTION = 0.03
 
 # Canonical party display order in the sunburst (clockwise)
 PARTY_ORDER = ["Democratic", "Republican", "Independent", "Other"]
+
+
+def load_current_legislators(path: str) -> set:
+    """
+    Returns a set of normalized full names of currently serving legislators.
+    Falls back to empty set (all politicians treated as current) if file not found.
+    """
+    if not os.path.exists(path):
+        print(f"  [WARN] {path} not found — is_current will be False for all politicians.")
+        return set()
+    df = pd.read_csv(path, usecols=["full_name"])
+    return set(df["full_name"].str.strip().str.lower())
 
 
 def build_ticker_nodes(ticker_volumes: pd.Series, min_fraction: float) -> list:
@@ -64,7 +77,8 @@ def build_ticker_nodes(ticker_volumes: pd.Series, min_fraction: float) -> list:
     return nodes
 
 
-def build_politician_node(politician: str, alpha_row: pd.Series, trades: pd.DataFrame, min_fraction: float) -> dict:
+def build_politician_node(politician: str, alpha_row: pd.Series, trades: pd.DataFrame,
+                          min_fraction: float, current_legislators: set) -> dict:
     """
     Builds a politician node with ticker children.
     Ticker volumes = sum of amount_mid for ALL trades (buy + sell) for that ticker.
@@ -78,12 +92,14 @@ def build_politician_node(politician: str, alpha_row: pd.Series, trades: pd.Data
         "weighted_alpha": None if np.isnan(alpha_row["weighted_alpha"]) else round(float(alpha_row["weighted_alpha"]), 4),
         "total_volume":   int(alpha_row["total_volume"]),
         "trade_count":    int(alpha_row["trade_count"]),
+        "is_current":     politician.strip().lower() in current_legislators,
         "children":       ticker_nodes,
     }
     return node
 
 
-def build_party_node(party: str, politicians_df: pd.DataFrame, trades: pd.DataFrame, min_fraction: float) -> dict:
+def build_party_node(party: str, politicians_df: pd.DataFrame, trades: pd.DataFrame,
+                     min_fraction: float, current_legislators: set) -> dict:
     """
     Builds a party node with politician children, sorted by weighted_alpha descending.
     Politicians with NaN alpha are sorted to the end.
@@ -102,7 +118,7 @@ def build_party_node(party: str, politicians_df: pd.DataFrame, trades: pd.DataFr
         politician_trades = trades[trades["politician"] == politician]
         if politician_trades.empty:
             continue
-        node = build_politician_node(politician, alpha_row, politician_trades, min_fraction)
+        node = build_politician_node(politician, alpha_row, politician_trades, min_fraction, current_legislators)
         children.append(node)
 
     return {
@@ -111,19 +127,19 @@ def build_party_node(party: str, politicians_df: pd.DataFrame, trades: pd.DataFr
     }
 
 
-def build_hierarchy(alphas: pd.DataFrame, trades: pd.DataFrame, min_fraction: float = MIN_TICKER_FRACTION) -> dict:
+def build_hierarchy(alphas: pd.DataFrame, trades: pd.DataFrame,
+                    current_legislators: set, min_fraction: float = MIN_TICKER_FRACTION) -> dict:
     """
     Builds the full 3-layer hierarchy dict.
     Only includes parties that have at least one politician with trade data.
     """
     present_parties = alphas["party"].unique()
     ordered_parties = [p for p in PARTY_ORDER if p in present_parties]
-    # Append any parties not in PARTY_ORDER (shouldn't happen, but be safe)
     ordered_parties += [p for p in present_parties if p not in ordered_parties]
 
     party_nodes = []
     for party in ordered_parties:
-        node = build_party_node(party, alphas, trades, min_fraction)
+        node = build_party_node(party, alphas, trades, min_fraction, current_legislators)
         if node["children"]:
             party_nodes.append(node)
 
@@ -142,9 +158,15 @@ def main():
     print(f"Loading {ALPHAS_PATH}...")
     alphas = pd.read_csv(ALPHAS_PATH)
 
+    print(f"Loading current legislators from {LEGISLATORS_PATH}...")
+    current_legislators = load_current_legislators(LEGISLATORS_PATH)
+
     print(f"  {len(alphas)} politicians across parties: {alphas['party'].value_counts().to_dict()}")
 
-    hierarchy = build_hierarchy(alphas, trades)
+    current_count = sum(1 for n in alphas["politician"] if n.strip().lower() in current_legislators)
+    print(f"  Currently serving matched: {current_count}/{len(alphas)}")
+
+    hierarchy = build_hierarchy(alphas, trades, current_legislators)
 
     total_politicians = sum(len(p["children"]) for p in hierarchy["children"])
     print(f"  Built hierarchy: {len(hierarchy['children'])} parties, {total_politicians} politicians")

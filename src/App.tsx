@@ -8,6 +8,19 @@ const SLIDER_MAX  =  0.4;
 const SLIDER_STEP =  0.01;
 const MAX_SIZE    =  800;
 
+function filterByCurrent(data: HierarchyData, currentOnly: boolean): HierarchyData {
+  if (!currentOnly) return data;
+  return {
+    ...data,
+    children: data.children
+      .map((party) => ({
+        ...party,
+        children: (party.children as PoliticianNode[]).filter((p) => p.is_current),
+      }))
+      .filter((party) => party.children.length > 0),
+  };
+}
+
 function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
   return {
     ...data,
@@ -41,21 +54,22 @@ function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyD
 }
 
 export default function App() {
-  const [data,     setData]     = useState<HierarchyData | null>(null);
-  const [error,    setError]    = useState<string | null>(null);
-  const [minAlpha, setMinAlpha] = useState(SLIDER_MIN);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [data,      setData]      = useState<HierarchyData | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
+  const [minAlpha,     setMinAlpha]     = useState(SLIDER_MIN);
+  const [expanded,     setExpanded]     = useState<Set<string>>(new Set());
+  const [currentOnly,  setCurrentOnly]  = useState(false);
   const [chartSize, setChartSize] = useState(MAX_SIZE);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const chartAreaRef = useRef<HTMLDivElement>(null);
 
-  // Responsive sizing
+  // Size chart to fit the available square in the content row
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!chartAreaRef.current) return;
     const ro = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width ?? MAX_SIZE;
-      setChartSize(Math.min(Math.floor(width), MAX_SIZE));
+      const { width, height } = entries[0]!.contentRect;
+      setChartSize(Math.min(Math.floor(width), Math.floor(height), MAX_SIZE));
     });
-    ro.observe(containerRef.current);
+    ro.observe(chartAreaRef.current);
     return () => ro.disconnect();
   }, []);
 
@@ -80,8 +94,11 @@ export default function App() {
 
   const displayData = useMemo(() => {
     if (!data) return null;
-    return applyExpansions(filterByAlpha(data, minAlpha), expanded);
-  }, [data, minAlpha, expanded]);
+    return applyExpansions(
+      filterByCurrent(filterByAlpha(data, minAlpha), currentOnly),
+      expanded
+    );
+  }, [data, minAlpha, currentOnly, expanded]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
 
@@ -90,45 +107,66 @@ export default function App() {
 
   return (
     <main className="app-layout">
-      <h1 className="app-title">Congressional Stock Trading</h1>
+      <div className="content-row">
+        <div className="chart-column">
+          <header className="app-header">
+            <h1 className="app-title">Congressional Stock Trading</h1>
+            <div className="controls">
+              <div className="controls-row">
+                <label className="slider-label">
+                  Min Alpha vs SPY
+                  <span className="slider-value" style={{ color: minAlpha >= 0 ? "#22C55E" : "#EF4444" }}>
+                    {alphaLabel}
+                  </span>
+                </label>
+                <input
+                  type="range"
+                  min={SLIDER_MIN}
+                  max={SLIDER_MAX}
+                  step={SLIDER_STEP}
+                  value={minAlpha}
+                  onChange={(e) => setMinAlpha(parseFloat(e.target.value))}
+                  className="slider"
+                />
+                <span className="slider-count">{visibleCount} shown</span>
+                <label className="toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={currentOnly}
+                    onChange={(e) => setCurrentOnly(e.target.checked)}
+                  />
+                  Current only
+                </label>
+              </div>
+              <p className="footnote">* Only legislators with 10+ disclosed purchase transactions are included</p>
+            </div>
+          </header>
 
-      <div className="slider-container">
-        <label className="slider-label">
-          Min Alpha vs SPY
-          <span className="slider-value" style={{ color: minAlpha >= 0 ? "#22C55E" : "#EF4444" }}>
-            {alphaLabel}
-          </span>
-        </label>
-        <input
-          type="range"
-          min={SLIDER_MIN}
-          max={SLIDER_MAX}
-          step={SLIDER_STEP}
-          value={minAlpha}
-          onChange={(e) => setMinAlpha(parseFloat(e.target.value))}
-          className="slider"
-        />
-        <span className="slider-count">{visibleCount} politicians</span>
-      </div>
-
-      <div ref={containerRef} className="chart-container">
-        {!displayData ? (
-          <div className="spinner-wrapper">
-            <div className="spinner" />
-            <span>Loading trading data...</span>
+          <div ref={chartAreaRef} className="chart-area">
+            {!displayData ? (
+              <div className="spinner-wrapper">
+                <div className="spinner" />
+                <span>Loading trading data...</span>
+              </div>
+            ) : visibleCount === 0 ? (
+              <div className="empty-state">
+                <span className="empty-state-icon">○</span>
+                <span className="empty-state-title">No politicians match these filters</span>
+                <span className="empty-state-hint">Try lowering the alpha threshold or unchecking "Current only"</span>
+              </div>
+            ) : (
+              <Sunburst
+                data={displayData}
+                width={chartSize}
+                height={chartSize}
+                expandedPoliticians={expanded}
+                onCollapsedClick={handleCollapsedClick}
+              />
+            )}
           </div>
-        ) : (
-          <Sunburst
-            data={displayData}
-            width={chartSize}
-            height={chartSize}
-            expandedPoliticians={expanded}
-            onCollapsedClick={handleCollapsedClick}
-          />
-        )}
+        </div>
+        <Legend />
       </div>
-
-      <Legend />
     </main>
   );
 }
