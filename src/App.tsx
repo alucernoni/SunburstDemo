@@ -125,8 +125,8 @@ const MAX_INLINE_TICKER_EXPAND = 10;
 
 // When a politician is zoomed to fill 2π, expand their tickers from collapsed_tickers up to
 // this limit — the Case-1 capacity of the full ticker ring.
-// = floor(2π * (MAX_SIZE/2 * 7/8) / 18) ≈ floor(2π * 350 / 18) ≈ 122
-const ZOOM_MAX_TICKERS = Math.floor(2 * Math.PI * (MAX_SIZE / 2) * (7 / 8) / 18);
+// = floor(2π * (MAX_SIZE/2 * 7/8) / MIN_ARC_PX[3]) ≈ floor(2π * 350 / 14) ≈ 157
+const ZOOM_MAX_TICKERS = Math.floor(2 * Math.PI * (MAX_SIZE / 2) * (7 / 8) / 14);
 
 function expandForZoom(data: HierarchyData, politicianName: string): HierarchyData {
   return {

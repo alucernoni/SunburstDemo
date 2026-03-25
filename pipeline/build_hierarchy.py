@@ -43,9 +43,13 @@ MIN_POL_ARC_RAD   = MIN_POL_ARC_PX / _RING2_MID_PX    # ≈ 0.080 rad per politi
 POL_FLOOR_ALPHA   = 0.5                  # LABEL_FLOOR_ALPHA in Sunburst.tsx
 
 # Ring-3 geometry (ticker ring)
+# Use 16px threshold (vs frontend MIN_ARC_PX[3]=14) to stay conservative:
+# the actual chart renders slightly smaller than ASSUMED_CHART_PX, so the
+# frontend's real minLabelArc is larger than our computed value. The 2px
+# margin keeps max_visible in Case 1 on a real chart (~746px wide).
 _RING3_MID_PX     = _RADIUS * (7 / 8)   # 350 px
-MIN_TICKER_ARC_PX = 18                   # MIN_ARC_PX[3] in Sunburst.tsx
-MIN_TICKER_ARC_RAD = MIN_TICKER_ARC_PX / _RING3_MID_PX  # ≈ 0.0514 rad per ticker
+MIN_TICKER_ARC_PX = 16                   # conservative vs MIN_ARC_PX[3]=14 in Sunburst.tsx
+MIN_TICKER_ARC_RAD = MIN_TICKER_ARC_PX / _RING3_MID_PX  # ≈ 0.0457 rad per ticker
 
 # Frontend collapse constants (approximate collapseSmallPoliticians in App.tsx)
 POLITICIAN_MAX_VISIBLE       = 24    # POLITICIAN_MAX_VISIBLE in App.tsx

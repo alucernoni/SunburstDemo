@@ -218,7 +218,7 @@ function enforceMinTickerArcs(
 }
 
 // Minimum arc length (px) at midpoint radius required to show a label
-const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 20, 3: 18 };
+const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 20, 3: 14 };
 
 function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 1) return (d.data as { name: string }).name;
