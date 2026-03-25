@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Sunburst from "./Sunburst";
 import Legend from "./Legend";
-import type { HierarchyData, PoliticianNode, TickerNode } from "./types";
+import TickerPanel from "./TickerPanel";
+import type { HierarchyData, PoliticianNode, TickerNode, CollapsedTicker } from "./types";
 
 const SLIDER_MIN  = -0.4;
 const SLIDER_MAX  =  0.4;
@@ -142,7 +143,9 @@ export default function App() {
   const [minAlpha,     setMinAlpha]    = useState(SLIDER_MIN);
   const [expanded,     setExpanded]    = useState<Set<string>>(new Set());
   const [currentOnly,  setCurrentOnly] = useState(false);
-  const [zoomedParty,  setZoomedParty] = useState<string | null>(null);
+  const [zoomedParty,       setZoomedParty]       = useState<string | null>(null);
+  const [zoomedPolitician,  setZoomedPolitician]  = useState<string | null>(null);
+  const [tickerPanel,       setTickerPanel]       = useState<{ politicianName: string; tickers: CollapsedTicker[] } | null>(null);
   const [chartSize,    setChartSize]   = useState(MAX_SIZE);
   const chartAreaRef = useRef<HTMLDivElement>(null);
 
@@ -167,13 +170,8 @@ export default function App() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  const handleCollapsedClick = useCallback((politicianName: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(politicianName)) next.delete(politicianName);
-      else next.add(politicianName);
-      return next;
-    });
+  const handleShowTickerPanel = useCallback((politicianName: string, tickers: CollapsedTicker[]) => {
+    setTickerPanel({ politicianName, tickers });
   }, []);
 
   // Step 1: filter + sanitize (no expansion yet)
@@ -200,12 +198,14 @@ export default function App() {
         : (totalVolume > 0 ? (partyVolume / totalVolume) * 2 * Math.PI : 0);
       for (const politician of party.children as PoliticianNode[]) {
         if (!politician.children.some((t) => t.collapsed)) continue;
-        const arcAngle = partyVolume > 0 ? (politician.total_volume / partyVolume) * partyArc : 0;
+        const arcAngle = zoomedPolitician === politician.name
+          ? 2 * Math.PI
+          : (partyVolume > 0 ? (politician.total_volume / partyVolume) * partyArc : 0);
         if (arcAngle * ringMidRadius >= AUTO_EXPAND_ARC_PX) result.add(politician.name);
       }
     }
     return result;
-  }, [filteredData, expanded, zoomedParty, chartSize]);
+  }, [filteredData, expanded, zoomedParty, zoomedPolitician, chartSize]);
 
   // Step 3: apply expansions with the merged set
   const displayData = useMemo(() => {
@@ -275,14 +275,23 @@ export default function App() {
                 width={chartSize}
                 height={chartSize}
                 expandedPoliticians={effectiveExpanded}
-                onCollapsedClick={handleCollapsedClick}
                 zoomedParty={zoomedParty}
                 onPartyClick={setZoomedParty}
+                zoomedPolitician={zoomedPolitician}
+                onPoliticianClick={setZoomedPolitician}
+                onShowTickerPanel={handleShowTickerPanel}
               />
             )}
           </div>
         </div>
         <Legend />
+        {tickerPanel && (
+          <TickerPanel
+            politicianName={tickerPanel.politicianName}
+            tickers={tickerPanel.tickers}
+            onClose={() => setTickerPanel(null)}
+          />
+        )}
       </div>
     </main>
   );

@@ -1,6 +1,6 @@
 import { useRef, useEffect } from "react";
 import * as d3 from "d3";
-import type { HierarchyData, PoliticianNode, TickerNode } from "./types";
+import type { HierarchyData, PoliticianNode, TickerNode, CollapsedTicker } from "./types";
 
 interface SunburstProps {
   data: HierarchyData;
@@ -8,9 +8,11 @@ interface SunburstProps {
   width?: number;
   height?: number;
   expandedPoliticians?: Set<string>;
-  onCollapsedClick?: (politicianName: string) => void;
   zoomedParty?: string | null;
   onPartyClick?: (party: string | null) => void;
+  zoomedPolitician?: string | null;
+  onPoliticianClick?: (name: string | null) => void;
+  onShowTickerPanel?: (politicianName: string, tickers: CollapsedTicker[]) => void;
 }
 
 const PARTY_COLORS: Record<string, string> = {
@@ -144,9 +146,10 @@ function enforceMinPartyArcs(root: d3.HierarchyRectangularNode<HierarchyData>): 
   }
 }
 
-// Politician ring (depth 2) midpoint sits at 5/8 of radius in a 4-level partition
-const RING2_MID_FRACTION = 5 / 8;
-// In crowded mode (floor × n > party arc), each politician still gets this fraction of equal share
+// Ring midpoints in a 4-level partition (root→party→politician→ticker, size=[2π,radius])
+const RING2_MID_FRACTION = 5 / 8;  // depth 2: (radius/2 + 3*radius/4) / 2
+const RING3_MID_FRACTION = 7 / 8;  // depth 3: (3*radius/4 + radius) / 2
+// In crowded mode (floor × n > arc), each slice still gets this fraction of equal share
 const LABEL_FLOOR_ALPHA  = 0.5;
 
 function enforceMinPoliticianArcs(
@@ -182,6 +185,37 @@ function enforceMinPoliticianArcs(
   }
 }
 
+function enforceMinTickerArcs(
+  root: d3.HierarchyRectangularNode<HierarchyData>,
+  radius: number
+): void {
+  const minLabelArc = MIN_ARC_PX[3] / (radius * RING3_MID_FRACTION);
+
+  for (const party of root.children ?? []) {
+    for (const politician of party.children ?? []) {
+      const tickers = politician.children;
+      if (!tickers || tickers.length === 0) continue;
+
+      const polArc  = politician.x1 - politician.x0;
+      const n       = tickers.length;
+      const totalVal = politician.value ?? 1;
+
+      const floorArc = n * minLabelArc <= polArc
+        ? minLabelArc
+        : (polArc / n) * LABEL_FLOOR_ALPHA;
+
+      const remaining = Math.max(0, polArc - n * floorArc);
+
+      let cursor = politician.x0;
+      for (const ticker of tickers) {
+        const fraction = totalVal > 0 ? (ticker.value ?? 0) / totalVal : 1 / n;
+        rescaleSubtree(ticker, cursor, cursor + floorArc + fraction * remaining);
+        cursor += floorArc + fraction * remaining;
+      }
+    }
+  }
+}
+
 // Minimum arc length (px) at midpoint radius required to show a label
 const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 20, 3: 18 };
 
@@ -190,6 +224,7 @@ function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 2) {
     const node = d.data as unknown as PoliticianNode;
     if (node.collapsed) return node.name; // "N others" — show as-is
+    if (d.x1 - d.x0 > 1.5 * Math.PI) return node.name; // full name when zoomed
     const parts = node.name.trim().split(/\s+/);
     return parts[parts.length - 1] ?? node.name; // last name only
   }
@@ -200,6 +235,11 @@ function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
 function getLabelTransform(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   const angle  = (d.x0 + d.x1) / 2;          // midpoint angle in radians
   const r      = (d.y0 + d.y1) / 2;           // midpoint radius
+  // When any ring is zoomed to fill the full circle (arc > 270°) the tangent formula puts
+  // the label at the bottom oriented vertically. Pin it horizontally at the top instead.
+  if ((d.depth === 1 || d.depth === 2) && (d.x1 - d.x0) > 1.5 * Math.PI) {
+    return `translate(0, -${r})`;
+  }
   const deg    = angle * 180 / Math.PI - 90;   // rotate to tangent, offset for SVG 0=right
   const flip   = angle > Math.PI ? 180 : 0;    // keep text right-side up in lower half
   return `rotate(${deg}) translate(${r}, 0) rotate(${flip})`;
@@ -218,7 +258,7 @@ function getLabelColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return d.depth === 1 ? "#fff" : "rgba(0,0,0,0.75)";
 }
 
-export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, onCollapsedClick, zoomedParty, onPartyClick }: SunburstProps) {
+export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onShowTickerPanel }: SunburstProps) {
   const svgRef      = useRef<SVGSVGElement>(null);
   const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const tooltipRef  = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
@@ -263,7 +303,20 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         d3
           .hierarchy(data)
           .sum((d) => ("value" in d ? (d as { value?: number }).value ?? 0 : 0))
-          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+          .sort((a, b) => {
+            // Collapsed "N others" nodes always sort to the end of their parent arc
+            if (a.depth === 2) {
+              const aCol = !!(a.data as unknown as PoliticianNode).collapsed;
+              const bCol = !!(b.data as unknown as PoliticianNode).collapsed;
+              if (aCol !== bCol) return aCol ? 1 : -1;
+            }
+            if (a.depth === 3) {
+              const aCol = !!(a.data as unknown as TickerNode).collapsed;
+              const bCol = !!(b.data as unknown as TickerNode).collapsed;
+              if (aCol !== bCol) return aCol ? 1 : -1;
+            }
+            return (b.value ?? 0) - (a.value ?? 0);
+          })
       );
 
     const arc = d3
@@ -281,7 +334,22 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
 
     enforceMinPoliticianArcs(partitionRoot, radius);
 
-    const nodes = zoomedParty
+    // Find zoomed politician (if any) and rescale it + its parent party to fill the circle
+    const zoomedPolNode = zoomedPolitician
+      ? (partitionRoot.children
+          ?.flatMap((p) => p.children ?? [])
+          .find((d) => (d.data as unknown as PoliticianNode).name === zoomedPolitician) ?? null)
+      : null;
+    if (zoomedPolNode) {
+      rescaleSubtree(zoomedPolNode.parent!, 0, 2 * Math.PI);
+      rescaleSubtree(zoomedPolNode, 0, 2 * Math.PI);
+    }
+
+    enforceMinTickerArcs(partitionRoot, radius);
+
+    const nodes = zoomedPolNode
+      ? [zoomedPolNode.parent!, ...zoomedPolNode.descendants()]
+      : zoomedParty
       ? (partitionRoot.children?.find((d) => d.data.name === zoomedParty)?.descendants() ?? [])
       : partitionRoot.descendants().filter((d) => d.depth > 0);
 
@@ -323,19 +391,27 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       )
       .on("click", (_event: MouseEvent, d) => {
         if (d.depth === 1) {
-          const partyName = (d.data as { name: string }).name;
-          onPartyClick?.(zoomedParty === partyName ? null : partyName);
+          if (zoomedPolitician) {
+            // Clicking the party ring while in politician zoom exits politician zoom
+            onPoliticianClick?.(null);
+          } else {
+            const partyName = (d.data as { name: string }).name;
+            onPartyClick?.(zoomedParty === partyName ? null : partyName);
+          }
           return;
         }
-        if (!onCollapsedClick) return;
-        if (isCollapsed(d)) {
-          // "N others" clicked — expand
-          const politicianName = (d.parent?.data as unknown as PoliticianNode)?.name;
-          if (politicianName) onCollapsedClick(politicianName);
-        } else if (d.depth === 2 && !isCollapsedPolitician(d)) {
-          // Politician arc clicked — collapse if currently expanded
+        if (d.depth === 2 && !isCollapsedPolitician(d)) {
           const politicianName = (d.data as unknown as PoliticianNode).name;
-          if (expandedPoliticians?.has(politicianName)) onCollapsedClick(politicianName);
+          onPoliticianClick?.(zoomedPolitician === politicianName ? null : politicianName);
+          return;
+        }
+        if (isCollapsed(d)) {
+          // "N others" ticker clicked — open panel with full collapsed list
+          const tickerNode = d.data as unknown as TickerNode;
+          const politicianName = (d.parent?.data as unknown as PoliticianNode)?.name;
+          if (politicianName && tickerNode.collapsed_tickers?.length) {
+            onShowTickerPanel?.(politicianName, tickerNode.collapsed_tickers);
+          }
         }
       })
       .on("mouseover", (event: MouseEvent, d) => {
@@ -417,7 +493,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         .text("active traders");
     }
 
-  }, [data, width, height, expandedPoliticians, onCollapsedClick, zoomedParty, onPartyClick]);
+  }, [data, width, height, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onShowTickerPanel]);
 
   return <svg ref={svgRef} />;
 }
