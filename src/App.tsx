@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Sunburst from "./Sunburst";
 import Legend from "./Legend";
 import TickerPanel from "./TickerPanel";
-import type { HierarchyData, PoliticianNode, TickerNode, CollapsedTicker } from "./types";
+import type { HierarchyData, PoliticianNode, CollapsedTicker } from "./types";
 
 const SLIDER_MIN  = -0.4;
 const SLIDER_MAX  =  0.4;
@@ -147,7 +147,6 @@ export default function App() {
   const [data,         setData]        = useState<HierarchyData | null>(null);
   const [error,        setError]       = useState<string | null>(null);
   const [minAlpha,     setMinAlpha]    = useState(SLIDER_MIN);
-  const [expanded,     setExpanded]    = useState<Set<string>>(new Set());
   const [currentOnly,  setCurrentOnly] = useState(false);
   const [zoomedParty,       setZoomedParty]       = useState<string | null>(null);
   const [zoomedPolitician,  setZoomedPolitician]  = useState<string | null>(null);
@@ -190,7 +189,7 @@ export default function App() {
 
   // Step 2: merge manual expanded set with arc-width-based auto-expansion
   const effectiveExpanded = useMemo(() => {
-    const result = new Set(expanded);
+    const result = new Set<string>();
     if (!filteredData || chartSize === 0) return result;
     const radius = chartSize / 2;
     const ringMidRadius = radius * RING2_MID_FRACTION;
@@ -211,7 +210,7 @@ export default function App() {
       }
     }
     return result;
-  }, [filteredData, expanded, zoomedParty, zoomedPolitician, chartSize]);
+  }, [filteredData, zoomedParty, zoomedPolitician, chartSize]);
 
   // Step 3: apply expansions with the merged set
   const displayData = useMemo(() => {
