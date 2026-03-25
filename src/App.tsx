@@ -119,6 +119,11 @@ function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
   };
 }
 
+// Only auto-expand the "N others" ticker group when it's small enough to display with labels.
+// Large groups (many collapsed_tickers) use the side panel instead — inlining hundreds of
+// tickers would produce tiny unlabeled slices.
+const MAX_INLINE_TICKER_EXPAND = 10;
+
 function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyData {
   return {
     ...data,
@@ -128,10 +133,11 @@ function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyD
         if (!expanded.has(politician.name)) return politician;
         const visibleTickers = politician.children.filter((t) => !t.collapsed);
         const othersNode     = politician.children.find((t) => t.collapsed);
-        const allTickers: TickerNode[] = othersNode
-          ? [...visibleTickers, ...(othersNode.collapsed_tickers ?? [])]
-          : visibleTickers;
-        return { ...politician, children: allTickers };
+        // Keep the "N others" node intact when the collapsed group is too large to display
+        if (!othersNode || (othersNode.collapsed_tickers?.length ?? 0) > MAX_INLINE_TICKER_EXPAND) {
+          return politician;
+        }
+        return { ...politician, children: [...visibleTickers, ...(othersNode.collapsed_tickers ?? [])] };
       }),
     })),
   };
