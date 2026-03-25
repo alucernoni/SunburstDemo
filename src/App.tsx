@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Sunburst from "./Sunburst";
 import Legend from "./Legend";
 import TickerPanel from "./TickerPanel";
-import type { HierarchyData, PoliticianNode, CollapsedTicker } from "./types";
+import type { HierarchyData, PoliticianNode, TickerNode, CollapsedTicker } from "./types";
 
 const SLIDER_MIN  = -0.4;
 const SLIDER_MAX  =  0.4;
@@ -120,9 +120,45 @@ function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
 }
 
 // Only auto-expand the "N others" ticker group when it's small enough to display with labels.
-// Large groups (many collapsed_tickers) use the side panel instead — inlining hundreds of
-// tickers would produce tiny unlabeled slices.
+// Large groups use the side panel instead — inlining hundreds of tickers produces tiny slices.
 const MAX_INLINE_TICKER_EXPAND = 10;
+
+// When a politician is zoomed to fill 2π, expand their tickers from collapsed_tickers up to
+// this limit — the Case-1 capacity of the full ticker ring.
+// = floor(2π * (MAX_SIZE/2 * 7/8) / 18) ≈ floor(2π * 350 / 18) ≈ 122
+const ZOOM_MAX_TICKERS = Math.floor(2 * Math.PI * (MAX_SIZE / 2) * (7 / 8) / 18);
+
+function expandForZoom(data: HierarchyData, politicianName: string): HierarchyData {
+  return {
+    ...data,
+    children: data.children.map((party) => ({
+      ...party,
+      children: (party.children as PoliticianNode[]).map((pol) => {
+        if (pol.name !== politicianName) return pol;
+        const visibleTickers  = pol.children.filter((t) => !t.collapsed);
+        const othersNode      = pol.children.find((t) => t.collapsed);
+        if (!othersNode?.collapsed_tickers?.length) return pol;
+
+        // Merge visible + collapsed, sorted by value desc (already sorted from pipeline)
+        const all      = [...visibleTickers, ...(othersNode.collapsed_tickers)];
+        const toShow   = all.slice(0, ZOOM_MAX_TICKERS);
+        const leftover = all.slice(ZOOM_MAX_TICKERS);
+
+        if (leftover.length === 0) return { ...pol, children: toShow };
+        if (leftover.length === 1) {
+          return { ...pol, children: [...toShow, { name: leftover[0].name, value: leftover[0].value }] };
+        }
+        const newOthers: TickerNode = {
+          name:              `${leftover.length} others`,
+          value:             leftover.reduce((s, t) => s + t.value, 0),
+          collapsed:         true,
+          collapsed_tickers: leftover,
+        };
+        return { ...pol, children: [...toShow, newOthers] };
+      }),
+    })),
+  };
+}
 
 function applyExpansions(data: HierarchyData, expanded: Set<string>): HierarchyData {
   return {
@@ -212,11 +248,13 @@ export default function App() {
     return result;
   }, [filteredData, zoomedParty, zoomedPolitician, chartSize]);
 
-  // Step 3: apply expansions with the merged set
+  // Step 3: apply auto-expansions, then also fully expand the zoomed politician's tickers
   const displayData = useMemo(() => {
     if (!filteredData) return null;
-    return applyExpansions(filteredData, effectiveExpanded);
-  }, [filteredData, effectiveExpanded]);
+    let d = applyExpansions(filteredData, effectiveExpanded);
+    if (zoomedPolitician) d = expandForZoom(d, zoomedPolitician);
+    return d;
+  }, [filteredData, effectiveExpanded, zoomedPolitician]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
 

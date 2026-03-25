@@ -25,30 +25,82 @@ OUTPUT_PATH       = "public/hierarchy.json"
 LEGISLATORS_PATH  = "pipeline/data/raw/legislators-current.csv"
 
 # ── Ticker visibility sizing ────────────────────────────────────────────────
-# These constants mirror the frontend (Sunburst.tsx / App.tsx) so the number
-# of visible tickers per politician matches what the chart can render with
-# readable labels.
-#
-# Formula: politician gets pol_arc = (pol_vol / total_vol) * 2π radians.
-# Max tickers with labels = floor(pol_arc / min_ticker_arc_rad)
-# where min_ticker_arc_rad = MIN_TICKER_ARC_PX / (radius * RING3_MID_FRACTION).
+# max_visible per politician = floor(eff_arc / MIN_TICKER_ARC_RAD)
+# where eff_arc is the politician's arc after enforceMinPoliticianArcs
+# (computed here to stay in sync with the frontend rendering).
 #
 # Must stay in sync with:
-#   App.tsx        MAX_SIZE = 800
-#   Sunburst.tsx   MIN_ARC_PX[3] = 18, RING3_MID_FRACTION = 7/8, TICKER_FLOOR_ALPHA = 0.8
-ASSUMED_CHART_PX    = 800        # MAX_SIZE in App.tsx
-RING3_MID_FRACTION  = 7 / 8     # outer ring midpoint fraction of radius
-MIN_TICKER_ARC_PX   = 18        # MIN_ARC_PX[3] in Sunburst.tsx
-TICKER_FLOOR_ALPHA  = 0.8       # TICKER_FLOOR_ALPHA in Sunburst.tsx
+#   App.tsx        MAX_SIZE = 800, POLITICIAN_MAX_VISIBLE = 24, POLITICIAN_COLLAPSE_FRACTION = 0.10
+#   Sunburst.tsx   MIN_ARC_PX[2] = 20, RING2_MID_FRACTION = 5/8, LABEL_FLOOR_ALPHA = 0.5
+#                  MIN_ARC_PX[3] = 18, RING3_MID_FRACTION = 7/8, TICKER_FLOOR_ALPHA = 0.8
+ASSUMED_CHART_PX  = 800         # MAX_SIZE in App.tsx
+_RADIUS           = ASSUMED_CHART_PX / 2
 
-_RADIUS             = ASSUMED_CHART_PX / 2
-_RING3_MID_PX       = _RADIUS * RING3_MID_FRACTION          # 350 px
-MIN_TICKER_ARC_RAD  = MIN_TICKER_ARC_PX / _RING3_MID_PX     # ≈ 0.0514 rad / ticker
-# Minimum visible tickers regardless of arc size
-MIN_VISIBLE_TICKERS = 10
+# Ring-2 geometry (politician ring) — for computing effective politician arcs
+_RING2_MID_PX     = _RADIUS * (5 / 8)   # 250 px
+MIN_POL_ARC_PX    = 20                   # MIN_ARC_PX[2] in Sunburst.tsx
+MIN_POL_ARC_RAD   = MIN_POL_ARC_PX / _RING2_MID_PX    # ≈ 0.080 rad per politician
+POL_FLOOR_ALPHA   = 0.5                  # LABEL_FLOOR_ALPHA in Sunburst.tsx
+
+# Ring-3 geometry (ticker ring)
+_RING3_MID_PX     = _RADIUS * (7 / 8)   # 350 px
+MIN_TICKER_ARC_PX = 18                   # MIN_ARC_PX[3] in Sunburst.tsx
+MIN_TICKER_ARC_RAD = MIN_TICKER_ARC_PX / _RING3_MID_PX  # ≈ 0.0514 rad per ticker
+
+# Frontend collapse constants (approximate collapseSmallPoliticians in App.tsx)
+POLITICIAN_MAX_VISIBLE       = 24    # POLITICIAN_MAX_VISIBLE in App.tsx
+POLITICIAN_COLLAPSE_FRACTION = 0.10  # POLITICIAN_COLLAPSE_FRACTION in App.tsx
+
+# Minimum visible tickers — safety floor for very small politicians
+MIN_VISIBLE_TICKERS = 5
 
 # Canonical party display order in the sunburst (clockwise)
 PARTY_ORDER = ["Democratic", "Republican", "Independent", "Other"]
+
+
+def compute_effective_pol_arcs(alphas: pd.DataFrame, total_congress_volume: float) -> dict:
+    """
+    Approximates the effective arc each politician receives in the chart, mirroring
+    the frontend's enforceMinPoliticianArcs + approximate collapseSmallPoliticians.
+
+    Returns {politician_name: arc_radians}.
+    Politicians that would be collapsed into "N others" in the frontend get their
+    raw proportional arc (they won't show individual tickers anyway).
+    """
+    TWO_PI = 2 * math.pi
+    eff_arcs = {}
+
+    for party, group in alphas.groupby("party"):
+        party_arc = group["total_volume"].sum() / total_congress_volume * TWO_PI
+
+        # Approximate collapseSmallPoliticians: keep top POLITICIAN_MAX_VISIBLE by volume.
+        sorted_pols = group.sort_values("total_volume", ascending=False)
+        visible_pols  = sorted_pols.head(POLITICIAN_MAX_VISIBLE)
+        collapsed_pols = sorted_pols.iloc[POLITICIAN_MAX_VISIBLE:]
+
+        visible_vol = visible_pols["total_volume"].sum()
+        n = len(visible_pols)
+
+        # Replicate enforceMinPoliticianArcs Case-1 / Case-2 logic
+        if n > 0 and n * MIN_POL_ARC_RAD <= party_arc:
+            floor_arc = MIN_POL_ARC_RAD
+        elif n > 0:
+            floor_arc = (party_arc / n) * POL_FLOOR_ALPHA
+        else:
+            floor_arc = 0.0
+
+        remaining = max(0.0, party_arc - n * floor_arc)
+
+        for _, row in visible_pols.iterrows():
+            fraction = row["total_volume"] / visible_vol if visible_vol > 0 else 1.0 / n
+            eff_arcs[row["politician"]] = floor_arc + fraction * remaining
+
+        # Collapsed politicians: fall back to raw arc (used only as safety floor input)
+        for _, row in collapsed_pols.iterrows():
+            raw_arc = row["total_volume"] / total_congress_volume * TWO_PI
+            eff_arcs[row["politician"]] = raw_arc
+
+    return eff_arcs
 
 
 def load_current_legislators(path: str) -> set:
@@ -67,7 +119,7 @@ def build_ticker_nodes(ticker_volumes: pd.Series, max_visible: int) -> list:
     """
     Given a Series of {ticker: volume}, returns a list of leaf nodes.
     At most max_visible tickers are shown; the rest are collapsed into "N others".
-    max_visible is computed from the politician's proportional arc in the full chart.
+    max_visible is computed from the politician's effective arc in the chart.
     """
     total = ticker_volumes.sum()
     if total == 0:
@@ -75,7 +127,7 @@ def build_ticker_nodes(ticker_volumes: pd.Series, max_visible: int) -> list:
 
     ticker_volumes = ticker_volumes.sort_values(ascending=False)
 
-    visible = ticker_volumes.head(max_visible)
+    visible  = ticker_volumes.head(max_visible)
     collapsed = ticker_volumes.iloc[max_visible:]
 
     nodes = [
@@ -101,23 +153,15 @@ def build_ticker_nodes(ticker_volumes: pd.Series, max_visible: int) -> list:
 
 
 def build_politician_node(politician: str, alpha_row: pd.Series, trades: pd.DataFrame,
-                          total_congress_volume: float, current_legislators: set) -> dict:
+                          eff_arc: float, current_legislators: set) -> dict:
     """
     Builds a politician node with ticker children.
     Ticker volumes = sum of amount_mid for ALL trades (buy + sell) for that ticker.
-    max_visible is computed from the politician's proportional arc (pol_vol / total_vol * 2π).
+    max_visible = floor(eff_arc / MIN_TICKER_ARC_RAD) — matches labeled capacity in chart.
     """
     ticker_volumes = trades.groupby("ticker")["amount_mid"].sum()
 
-    pol_vol = float(alpha_row["total_volume"])
-    if total_congress_volume > 0:
-        pol_arc = (pol_vol / total_congress_volume) * 2 * math.pi
-    else:
-        pol_arc = 0.0
-    # Allow into Case-2 territory (÷ TICKER_FLOOR_ALPHA) so more tickers fit;
-    # the frontend enforceMinTickerArcs distributes them with TICKER_FLOOR_ALPHA floor.
-    max_visible = max(math.floor(pol_arc / (MIN_TICKER_ARC_RAD * TICKER_FLOOR_ALPHA)), MIN_VISIBLE_TICKERS)
-
+    max_visible = max(math.floor(eff_arc / MIN_TICKER_ARC_RAD), MIN_VISIBLE_TICKERS)
     ticker_nodes = build_ticker_nodes(ticker_volumes, max_visible)
 
     node = {
@@ -133,7 +177,7 @@ def build_politician_node(politician: str, alpha_row: pd.Series, trades: pd.Data
 
 
 def build_party_node(party: str, politicians_df: pd.DataFrame, trades: pd.DataFrame,
-                     total_congress_volume: float, current_legislators: set) -> dict:
+                     eff_arcs: dict, current_legislators: set) -> dict:
     """
     Builds a party node with politician children, sorted by weighted_alpha descending.
     Politicians with NaN alpha are sorted to the end.
@@ -152,7 +196,8 @@ def build_party_node(party: str, politicians_df: pd.DataFrame, trades: pd.DataFr
         politician_trades = trades[trades["politician"] == politician]
         if politician_trades.empty:
             continue
-        node = build_politician_node(politician, alpha_row, politician_trades, total_congress_volume, current_legislators)
+        eff_arc = eff_arcs.get(politician, 0.0)
+        node = build_politician_node(politician, alpha_row, politician_trades, eff_arc, current_legislators)
         children.append(node)
 
     return {
@@ -168,6 +213,7 @@ def build_hierarchy(alphas: pd.DataFrame, trades: pd.DataFrame,
     Only includes parties that have at least one politician with trade data.
     """
     total_congress_volume = float(alphas["total_volume"].sum())
+    eff_arcs = compute_effective_pol_arcs(alphas, total_congress_volume)
 
     present_parties = alphas["party"].unique()
     ordered_parties = [p for p in PARTY_ORDER if p in present_parties]
@@ -175,7 +221,7 @@ def build_hierarchy(alphas: pd.DataFrame, trades: pd.DataFrame,
 
     party_nodes = []
     for party in ordered_parties:
-        node = build_party_node(party, alphas, trades, total_congress_volume, current_legislators)
+        node = build_party_node(party, alphas, trades, eff_arcs, current_legislators)
         if node["children"]:
             party_nodes.append(node)
 
