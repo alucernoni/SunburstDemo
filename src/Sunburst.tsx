@@ -147,10 +147,11 @@ function enforceMinPartyArcs(root: d3.HierarchyRectangularNode<HierarchyData>): 
 }
 
 // Ring midpoints in a 4-level partition (root→party→politician→ticker, size=[2π,radius])
-const RING2_MID_FRACTION = 5 / 8;  // depth 2: (radius/2 + 3*radius/4) / 2
-const RING3_MID_FRACTION = 7 / 8;  // depth 3: (3*radius/4 + radius) / 2
-// In crowded mode (floor × n > arc), each slice still gets this fraction of equal share
-const LABEL_FLOOR_ALPHA  = 0.5;
+const RING2_MID_FRACTION  = 5 / 8;  // depth 2: (radius/2 + 3*radius/4) / 2
+const RING3_MID_FRACTION  = 7 / 8;  // depth 3: (3*radius/4 + radius) / 2
+// In crowded mode (floor × n > arc), each slice gets this fraction of equal share as floor
+const LABEL_FLOOR_ALPHA   = 0.5;   // used for politician ring (depth 2)
+const TICKER_FLOOR_ALPHA  = 0.8;   // used for ticker ring (depth 3) — more even distribution
 
 function enforceMinPoliticianArcs(
   root: d3.HierarchyRectangularNode<HierarchyData>,
@@ -202,7 +203,7 @@ function enforceMinTickerArcs(
 
       const floorArc = n * minLabelArc <= polArc
         ? minLabelArc
-        : (polArc / n) * LABEL_FLOOR_ALPHA;
+        : (polArc / n) * TICKER_FLOOR_ALPHA;
 
       const remaining = Math.max(0, polArc - n * floorArc);
 

@@ -35,17 +35,17 @@ LEGISLATORS_PATH  = "pipeline/data/raw/legislators-current.csv"
 #
 # Must stay in sync with:
 #   App.tsx        MAX_SIZE = 800
-#   Sunburst.tsx   MIN_ARC_PX[3] = 18, RING3_MID_FRACTION = 7/8, LABEL_FLOOR_ALPHA = 0.5
-ASSUMED_CHART_PX   = 800        # MAX_SIZE in App.tsx
-RING3_MID_FRACTION = 7 / 8     # outer ring midpoint fraction of radius
-MIN_TICKER_ARC_PX  = 18        # MIN_ARC_PX[3] in Sunburst.tsx
-LABEL_FLOOR_ALPHA  = 0.5       # LABEL_FLOOR_ALPHA in Sunburst.tsx
+#   Sunburst.tsx   MIN_ARC_PX[3] = 18, RING3_MID_FRACTION = 7/8, TICKER_FLOOR_ALPHA = 0.8
+ASSUMED_CHART_PX    = 800        # MAX_SIZE in App.tsx
+RING3_MID_FRACTION  = 7 / 8     # outer ring midpoint fraction of radius
+MIN_TICKER_ARC_PX   = 18        # MIN_ARC_PX[3] in Sunburst.tsx
+TICKER_FLOOR_ALPHA  = 0.8       # TICKER_FLOOR_ALPHA in Sunburst.tsx
 
-_RADIUS            = ASSUMED_CHART_PX / 2
-_RING3_MID_PX      = _RADIUS * RING3_MID_FRACTION          # 350 px
-MIN_TICKER_ARC_RAD = MIN_TICKER_ARC_PX / _RING3_MID_PX     # ≈ 0.0514 rad / ticker
-# Minimum visible tickers regardless of arc size (ensures content when zoomed in)
-MIN_VISIBLE_TICKERS = 5
+_RADIUS             = ASSUMED_CHART_PX / 2
+_RING3_MID_PX       = _RADIUS * RING3_MID_FRACTION          # 350 px
+MIN_TICKER_ARC_RAD  = MIN_TICKER_ARC_PX / _RING3_MID_PX     # ≈ 0.0514 rad / ticker
+# Minimum visible tickers regardless of arc size
+MIN_VISIBLE_TICKERS = 10
 
 # Canonical party display order in the sunburst (clockwise)
 PARTY_ORDER = ["Democratic", "Republican", "Independent", "Other"]
@@ -114,7 +114,9 @@ def build_politician_node(politician: str, alpha_row: pd.Series, trades: pd.Data
         pol_arc = (pol_vol / total_congress_volume) * 2 * math.pi
     else:
         pol_arc = 0.0
-    max_visible = max(math.floor(pol_arc / MIN_TICKER_ARC_RAD), MIN_VISIBLE_TICKERS)
+    # Allow into Case-2 territory (÷ TICKER_FLOOR_ALPHA) so more tickers fit;
+    # the frontend enforceMinTickerArcs distributes them with TICKER_FLOOR_ALPHA floor.
+    max_visible = max(math.floor(pol_arc / (MIN_TICKER_ARC_RAD * TICKER_FLOOR_ALPHA)), MIN_VISIBLE_TICKERS)
 
     ticker_nodes = build_ticker_nodes(ticker_volumes, max_visible)
 
