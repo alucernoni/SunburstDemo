@@ -8,6 +8,89 @@ const SLIDER_MAX  =  0.4;
 const SLIDER_STEP =  0.01;
 const MAX_SIZE    =  800;
 
+// Politician ring (depth 2) sits at y ≈ 5/8 * radius in a 4-level partition
+const RING2_MID_FRACTION = 5 / 8;
+// Arc length (px) at ring-2 midpoint above which a politician's tickers auto-expand
+const AUTO_EXPAND_ARC_PX = 400;
+
+// Politicians whose combined volume is <= this fraction of the party total get collapsed.
+const POLITICIAN_COLLAPSE_FRACTION = 0.10;
+// Hard cap on visible politicians per party — ensures labels fit even for large parties.
+// Approximates: party arc (~π rad) / label floor (~0.12 rad each) ≈ 26.
+const POLITICIAN_MAX_VISIBLE = 24;
+
+// Collapse the smallest politicians within each party into "N others".
+// Two conditions (union — whichever requires more collapsing):
+//   1. Bottom 10% by volume
+//   2. Count exceeds POLITICIAN_MAX_VISIBLE
+function collapseSmallPoliticians(data: HierarchyData): HierarchyData {
+  return {
+    ...data,
+    children: data.children.map((party) => {
+      const politicians = party.children as PoliticianNode[];
+      const partyTotal  = politicians.reduce((s, p) => s + p.total_volume, 0);
+      const threshold   = partyTotal * POLITICIAN_COLLAPSE_FRACTION;
+
+      // Walk from smallest to largest, accumulating into the collapse bucket
+      const sorted = [...politicians].sort((a, b) => a.total_volume - b.total_volume);
+      let cumulative = 0;
+      const toCollapse: PoliticianNode[] = [];
+      for (const p of sorted) {
+        const remaining           = sorted.length - toCollapse.length;
+        const belowVolumeThreshold = cumulative + p.total_volume <= threshold;
+        const exceedsCountLimit    = remaining > POLITICIAN_MAX_VISIBLE;
+        if (belowVolumeThreshold || exceedsCountLimit) {
+          cumulative += p.total_volume;
+          toCollapse.push(p);
+        } else break;
+      }
+
+      // Don't collapse a single politician — "1 other" is unhelpful
+      if (toCollapse.length <= 1) return party;
+
+      const toKeep = politicians
+        .filter((p) => !toCollapse.includes(p))
+        .sort((a, b) => b.total_volume - a.total_volume);
+
+      const othersNode: PoliticianNode = {
+        name:           `${toCollapse.length} others`,
+        party_code:     politicians[0]?.party_code ?? "",
+        weighted_alpha: null,
+        total_volume:   cumulative,
+        trade_count:    toCollapse.reduce((s, p) => s + p.trade_count, 0),
+        is_current:     false,
+        collapsed:      true,
+        value:          cumulative,  // D3's .sum() uses this since children: [] gives no leaf sum
+        children:       [],
+      };
+
+      return { ...party, children: [...toKeep, othersNode] };
+    }),
+  };
+}
+
+// If a politician has exactly "1 other" collapsed, inline that ticker directly.
+function sanitizeCollapsed(data: HierarchyData): HierarchyData {
+  return {
+    ...data,
+    children: data.children.map((party) => ({
+      ...party,
+      children: (party.children as PoliticianNode[]).map((politician) => {
+        const collapsedNode = politician.children.find((t) => t.collapsed);
+        if (!collapsedNode || (collapsedNode.collapsed_tickers?.length ?? 0) !== 1) return politician;
+        const onlyTicker = collapsedNode.collapsed_tickers![0];
+        return {
+          ...politician,
+          children: [
+            ...politician.children.filter((t) => !t.collapsed),
+            { name: onlyTicker.name, value: onlyTicker.value },
+          ],
+        };
+      }),
+    })),
+  };
+}
+
 function filterByCurrent(data: HierarchyData, currentOnly: boolean): HierarchyData {
   if (!currentOnly) return data;
   return {
@@ -93,13 +176,42 @@ export default function App() {
     });
   }, []);
 
-  const displayData = useMemo(() => {
+  // Step 1: filter + sanitize (no expansion yet)
+  const filteredData = useMemo(() => {
     if (!data) return null;
-    return applyExpansions(
-      filterByCurrent(filterByAlpha(data, minAlpha), currentOnly),
-      expanded
+    return collapseSmallPoliticians(
+      sanitizeCollapsed(filterByCurrent(filterByAlpha(data, minAlpha), currentOnly))
     );
-  }, [data, minAlpha, currentOnly, expanded]);
+  }, [data, minAlpha, currentOnly]);
+
+  // Step 2: merge manual expanded set with arc-width-based auto-expansion
+  const effectiveExpanded = useMemo(() => {
+    const result = new Set(expanded);
+    if (!filteredData || chartSize === 0) return result;
+    const radius = chartSize / 2;
+    const ringMidRadius = radius * RING2_MID_FRACTION;
+    const totalVolume = filteredData.children.reduce(
+      (s, party) => s + (party.children as PoliticianNode[]).reduce((sp, p) => sp + p.total_volume, 0), 0
+    );
+    for (const party of filteredData.children) {
+      const partyVolume = (party.children as PoliticianNode[]).reduce((s, p) => s + p.total_volume, 0);
+      const partyArc = zoomedParty === party.name
+        ? 2 * Math.PI
+        : (totalVolume > 0 ? (partyVolume / totalVolume) * 2 * Math.PI : 0);
+      for (const politician of party.children as PoliticianNode[]) {
+        if (!politician.children.some((t) => t.collapsed)) continue;
+        const arcAngle = partyVolume > 0 ? (politician.total_volume / partyVolume) * partyArc : 0;
+        if (arcAngle * ringMidRadius >= AUTO_EXPAND_ARC_PX) result.add(politician.name);
+      }
+    }
+    return result;
+  }, [filteredData, expanded, zoomedParty, chartSize]);
+
+  // Step 3: apply expansions with the merged set
+  const displayData = useMemo(() => {
+    if (!filteredData) return null;
+    return applyExpansions(filteredData, effectiveExpanded);
+  }, [filteredData, effectiveExpanded]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
 
@@ -162,7 +274,7 @@ export default function App() {
                 totalPoliticians={totalPoliticians}
                 width={chartSize}
                 height={chartSize}
-                expandedPoliticians={expanded}
+                expandedPoliticians={effectiveExpanded}
                 onCollapsedClick={handleCollapsedClick}
                 zoomedParty={zoomedParty}
                 onPartyClick={setZoomedParty}

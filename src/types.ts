@@ -17,6 +17,8 @@ export interface PoliticianNode {
   total_volume: number;
   trade_count: number;
   is_current: boolean;
+  collapsed?: boolean;
+  value?: number;    // set on collapsed "N others" nodes so D3's .sum() accounts for their volume
   children: TickerNode[];
 }
 

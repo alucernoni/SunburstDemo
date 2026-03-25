@@ -63,7 +63,10 @@ def build_ticker_nodes(ticker_volumes: pd.Series, min_fraction: float) -> list:
         for ticker, volume in visible.items()
     ]
 
-    if not collapsed.empty:
+    if len(collapsed) == 1:
+        # Never show "1 other" — just display the ticker directly
+        nodes.append({"name": collapsed.index[0], "value": int(collapsed.iloc[0])})
+    elif not collapsed.empty:
         nodes.append({
             "name": f"{len(collapsed)} others",
             "value": int(collapsed.sum()),
