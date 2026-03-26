@@ -19,7 +19,7 @@ export default function Legend() {
         <div className="legend-swatches">
           {[
             { label: "Democratic",  color: "#3B82F6" },
-            { label: "Republican",  color: "#EF4444" },
+            { label: "Republican",  color: "#F97316" },
             { label: "Independent", color: "#A855F7" },
           ].map(({ label, color }) => (
             <div key={label} className="legend-swatch-row">

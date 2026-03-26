@@ -17,16 +17,16 @@ interface SunburstProps {
 
 const PARTY_COLORS: Record<string, string> = {
   Democratic:  "#3B82F6",
-  Republican:  "#EF4444",
+  Republican:  "#F97316",   // orange — distinct from the red used for negative alpha
   Independent: "#A855F7",
-  Other:       "#6B7280",
+  Other:       "#64748B",
 };
 
 const alphaColor = d3
   .scaleLinear<string>()
   .domain([-0.3, 0, 0.3])
   .clamp(true)
-  .range(["#EF4444", "#6B7280", "#22C55E"]);
+  .range(["#EF4444", "#475569", "#22C55E"]);
 
 const formatVolume = (v: number) =>
   v >= 1_000_000
@@ -254,9 +254,8 @@ function getLabelFontSize(d: d3.HierarchyRectangularNode<HierarchyData>): number
   return d.depth === 1 ? 11 : d.depth === 2 ? 9 : 8;
 }
 
-function getLabelColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
-  // Use white for party ring, dark for others to contrast with lighter arc fills
-  return d.depth === 1 ? "#fff" : "rgba(0,0,0,0.75)";
+function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  return "rgba(255,255,255,0.88)";
 }
 
 export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onShowTickerPanel }: SunburstProps) {
