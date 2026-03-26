@@ -36,6 +36,36 @@ const formatVolume = (v: number) =>
 const formatAlpha = (a: number | null) =>
   a == null ? "N/A" : `${a >= 0 ? "+" : ""}${(a * 100).toFixed(1)}%`;
 
+/**
+ * Normalises a raw politician name to { display, last }.
+ * Handles three formats found in the data:
+ *   "First [M.] Last"     → display: same,          last: Last
+ *   "Last, First [M.]"    → display: "First Last",   last: Last
+ *   "HON. FIRST LAST"     → display: "First Last",   last: Last  (title-cased)
+ *   ", First M. Last"     → display: "First M. Last", last: Last  (comma-prefix typo)
+ */
+function parsePoliticianName(raw: string): { display: string; last: string } {
+  // Strip honorific prefix
+  let s = raw.trim().replace(/^(hon\.|dr\.|sen\.|rep\.)\s+/i, "");
+  // Title-case all-uppercase names (e.g. "GREG STANTON")
+  if (s.length > 2 && s === s.toUpperCase()) {
+    s = s.split(/\s+/).map((w) => w ? w[0] + w.slice(1).toLowerCase() : "").join(" ");
+  }
+  if (s.includes(",")) {
+    const comma    = s.indexOf(",");
+    const lastName = s.slice(0, comma).trim();
+    const rest     = s.slice(comma + 1).trim();
+    if (!lastName) {
+      // Comma-prefix typo: ", Robert P Corker" → treat rest as "First Last"
+      const parts = rest.split(/\s+/);
+      return { display: rest, last: parts[parts.length - 1] ?? rest };
+    }
+    return { display: `${rest} ${lastName}`, last: lastName };
+  }
+  const parts = s.trim().split(/\s+/);
+  return { display: s, last: parts[parts.length - 1] ?? s };
+}
+
 // Stable key for each arc node — used by D3 join to track nodes across updates
 function nodeKey(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return d.ancestors().map((n) => n.data.name).reverse().join("/");
@@ -79,8 +109,9 @@ function getTooltipHtml(d: d3.HierarchyRectangularNode<HierarchyData>): string {
     const node = d.data as unknown as PoliticianNode;
     const alpha = node.weighted_alpha;
     const cls = alpha == null ? "" : alpha >= 0 ? "positive" : "negative";
+    const name = node.collapsed ? node.name : parsePoliticianName(node.name).display;
     return `
-      <div class="tt-title">${node.name}</div>
+      <div class="tt-title">${name}</div>
       <div class="tt-row"><span>Alpha vs SPY</span><span class="${cls}">${formatAlpha(alpha)}</span></div>
       <div class="tt-row"><span>Total Volume</span><span>${formatVolume(node.total_volume)}</span></div>
       <div class="tt-row"><span>Trades</span><span>${node.trade_count}</span></div>
@@ -91,11 +122,12 @@ function getTooltipHtml(d: d3.HierarchyRectangularNode<HierarchyData>): string {
     const politician = d.parent?.data as unknown as PoliticianNode;
     const alpha = node.collapsed ? null : (node.alpha ?? null);
     const cls = alpha == null ? "" : alpha >= 0 ? "positive" : "negative";
+    const traderName = politician ? parsePoliticianName(politician.name).display : null;
     return `
       <div class="tt-title">${node.name}</div>
       ${alpha != null ? `<div class="tt-row"><span>Alpha vs SPY</span><span class="${cls}">${formatAlpha(alpha)}</span></div>` : ""}
       <div class="tt-row"><span>Volume</span><span>${formatVolume(node.value)}</span></div>
-      ${politician ? `<div class="tt-row"><span>Trader</span><span>${politician.name}</span></div>` : ""}
+      ${traderName ? `<div class="tt-row"><span>Trader</span><span>${traderName}</span></div>` : ""}
     `;
   }
   return "";
@@ -228,9 +260,9 @@ function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 2) {
     const node = d.data as unknown as PoliticianNode;
     if (node.collapsed) return node.name; // "N others" — show as-is
-    if (d.x1 - d.x0 > 1.5 * Math.PI) return node.name; // full name when zoomed
-    const parts = node.name.trim().split(/\s+/);
-    return parts[parts.length - 1] ?? node.name; // last name only
+    const { display, last } = parsePoliticianName(node.name);
+    if (d.x1 - d.x0 > 1.5 * Math.PI) return display; // full name when zoomed
+    return last; // last name only on arc
   }
   if (d.depth === 3) return (d.data as unknown as TickerNode).name;
   return "";
@@ -411,9 +443,9 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         if (isCollapsed(d)) {
           // "N others" ticker clicked — open panel with full collapsed list
           const tickerNode = d.data as unknown as TickerNode;
-          const politicianName = (d.parent?.data as unknown as PoliticianNode)?.name;
-          if (politicianName && tickerNode.collapsed_tickers?.length) {
-            onShowTickerPanel?.(politicianName, tickerNode.collapsed_tickers);
+          const rawName = (d.parent?.data as unknown as PoliticianNode)?.name;
+          if (rawName && tickerNode.collapsed_tickers?.length) {
+            onShowTickerPanel?.(parsePoliticianName(rawName).display, tickerNode.collapsed_tickers);
           }
         }
       })
