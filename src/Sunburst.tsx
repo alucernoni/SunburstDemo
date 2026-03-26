@@ -12,6 +12,7 @@ interface SunburstProps {
   onPartyClick?: (party: string | null) => void;
   zoomedPolitician?: string | null;
   onPoliticianClick?: (name: string | null) => void;
+  onCollapsedPoliticiansClick?: (partyName: string) => void;
   onShowTickerPanel?: (politicianName: string, tickers: CollapsedTicker[]) => void;
 }
 
@@ -107,11 +108,18 @@ function getTooltipHtml(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   }
   if (d.depth === 2) {
     const node = d.data as unknown as PoliticianNode;
+    if (node.collapsed) {
+      return `
+        <div class="tt-title">${node.name}</div>
+        <div class="tt-row"><span>Total Volume</span><span>${formatVolume(node.total_volume)}</span></div>
+        <div class="tt-row"><span>Trades</span><span>${node.trade_count}</span></div>
+        <div class="tt-row" style="margin-top:6px;color:#64748b;font-size:11px"><span>Click to expand</span></div>
+      `;
+    }
     const alpha = node.weighted_alpha;
     const cls = alpha == null ? "" : alpha >= 0 ? "positive" : "negative";
-    const name = node.collapsed ? node.name : parsePoliticianName(node.name).display;
     return `
-      <div class="tt-title">${name}</div>
+      <div class="tt-title">${parsePoliticianName(node.name).display}</div>
       <div class="tt-row"><span>Alpha vs SPY</span><span class="${cls}">${formatAlpha(alpha)}</span></div>
       <div class="tt-row"><span>Total Volume</span><span>${formatVolume(node.total_volume)}</span></div>
       <div class="tt-row"><span>Trades</span><span>${node.trade_count}</span></div>
@@ -293,7 +301,7 @@ function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return "rgba(255,255,255,0.88)";
 }
 
-export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onShowTickerPanel }: SunburstProps) {
+export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onCollapsedPoliticiansClick, onShowTickerPanel }: SunburstProps) {
   const svgRef      = useRef<SVGSVGElement>(null);
   const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const tooltipRef  = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
@@ -435,6 +443,11 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           }
           return;
         }
+        if (d.depth === 2 && isCollapsedPolitician(d)) {
+          const partyName = (d.parent?.data as { name: string })?.name;
+          if (partyName) onCollapsedPoliticiansClick?.(partyName);
+          return;
+        }
         if (d.depth === 2 && !isCollapsedPolitician(d)) {
           const politicianName = (d.data as unknown as PoliticianNode).name;
           onPoliticianClick?.(zoomedPolitician === politicianName ? null : politicianName);
@@ -528,7 +541,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         .text("active traders");
     }
 
-  }, [data, width, height, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onShowTickerPanel]);
+  }, [data, width, height, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onCollapsedPoliticiansClick, onShowTickerPanel]);
 
   return <svg ref={svgRef} />;
 }

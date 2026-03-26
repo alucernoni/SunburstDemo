@@ -24,7 +24,7 @@ const POLITICIAN_MAX_VISIBLE = 24;
 // Two conditions (union — whichever requires more collapsing):
 //   1. Bottom 10% by volume
 //   2. Count exceeds POLITICIAN_MAX_VISIBLE
-function collapseSmallPoliticians(data: HierarchyData): HierarchyData {
+function collapseSmallPoliticians(data: HierarchyData, expandedPolParty: string | null = null): HierarchyData {
   return {
     ...data,
     children: data.children.map((party) => {
@@ -37,7 +37,7 @@ function collapseSmallPoliticians(data: HierarchyData): HierarchyData {
       let cumulative = 0;
       const toCollapse: PoliticianNode[] = [];
       for (const p of sorted) {
-        const remaining           = sorted.length - toCollapse.length;
+        const remaining            = sorted.length - toCollapse.length;
         const belowVolumeThreshold = cumulative + p.total_volume <= threshold;
         const exceedsCountLimit    = remaining > POLITICIAN_MAX_VISIBLE;
         if (belowVolumeThreshold || exceedsCountLimit) {
@@ -49,23 +49,29 @@ function collapseSmallPoliticians(data: HierarchyData): HierarchyData {
       // Don't collapse a single politician — "1 other" is unhelpful
       if (toCollapse.length <= 1) return party;
 
-      const toKeep = politicians
-        .filter((p) => !toCollapse.includes(p))
-        .sort((a, b) => b.total_volume - a.total_volume);
+      const toKeep = politicians.filter((p) => !toCollapse.includes(p));
+
+      // When this party's "N others" is expanded, swap which group is visible.
+      // The normally-hidden small politicians fill the arc; the big ones become "N others".
+      const isExpanded    = party.name === expandedPolParty;
+      const visible       = isExpanded ? toCollapse : toKeep;
+      const hidden        = isExpanded ? toKeep     : toCollapse;
+      const hiddenVol     = hidden.reduce((s, p) => s + p.total_volume, 0);
 
       const othersNode: PoliticianNode = {
-        name:           `${toCollapse.length} others`,
+        name:           `${hidden.length} others`,
         party_code:     politicians[0]?.party_code ?? "",
         weighted_alpha: null,
-        total_volume:   cumulative,
-        trade_count:    toCollapse.reduce((s, p) => s + p.trade_count, 0),
+        total_volume:   hiddenVol,
+        trade_count:    hidden.reduce((s, p) => s + p.trade_count, 0),
         is_current:     false,
         collapsed:      true,
-        value:          cumulative,  // D3's .sum() uses this since children: [] gives no leaf sum
+        value:          hiddenVol,  // D3's .sum() uses this since children: [] gives no leaf sum
         children:       [],
       };
 
-      return { ...party, children: [...toKeep, othersNode] };
+      const sortedVisible = [...visible].sort((a, b) => b.total_volume - a.total_volume);
+      return { ...party, children: [...sortedVisible, othersNode] };
     }),
   };
 }
@@ -278,6 +284,7 @@ export default function App() {
   const [currentOnly,  setCurrentOnly] = useState(false);
   const [zoomedParty,       setZoomedParty]       = useState<string | null>(null);
   const [zoomedPolitician,  setZoomedPolitician]  = useState<string | null>(null);
+  const [expandedPolParty,  setExpandedPolParty]  = useState<string | null>(null);
   const [tickerPanel,       setTickerPanel]       = useState<{ politicianName: string; tickers: CollapsedTicker[] } | null>(null);
   const [chartSize,    setChartSize]   = useState(MAX_SIZE);
   const chartAreaRef = useRef<HTMLDivElement>(null);
@@ -312,13 +319,14 @@ export default function App() {
     if (!data) return null;
     return collapseSmallTickers(
       collapseSmallPoliticians(
-        filterByCurrent(filterByAlpha(data, minAlpha), currentOnly)
+        filterByCurrent(filterByAlpha(data, minAlpha), currentOnly),
+        expandedPolParty,
       ),
       chartSize,
       zoomedParty,
       zoomedPolitician,
     );
-  }, [data, minAlpha, currentOnly, chartSize, zoomedParty, zoomedPolitician]);
+  }, [data, minAlpha, currentOnly, chartSize, zoomedParty, zoomedPolitician, expandedPolParty]);
 
   // Step 2: merge manual expanded set with arc-width-based auto-expansion
   const effectiveExpanded = useMemo(() => {
@@ -419,6 +427,9 @@ export default function App() {
                 onPartyClick={setZoomedParty}
                 zoomedPolitician={zoomedPolitician}
                 onPoliticianClick={setZoomedPolitician}
+                onCollapsedPoliticiansClick={(partyName) =>
+                  setExpandedPolParty((prev) => (prev === partyName ? null : partyName))
+                }
                 onShowTickerPanel={handleShowTickerPanel}
               />
             )}
