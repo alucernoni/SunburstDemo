@@ -70,25 +70,95 @@ function collapseSmallPoliticians(data: HierarchyData): HierarchyData {
   };
 }
 
-// If a politician has exactly "1 other" collapsed, inline that ticker directly.
-function sanitizeCollapsed(data: HierarchyData): HierarchyData {
+// Ticker ring (depth 3) sits at y ≈ 7/8 * radius in a 4-level partition
+const RING3_MID_FRACTION = 7 / 8;
+// Minimum arc length in px for a labeled ticker slice (matches Sunburst.tsx MIN_ARC_PX[3])
+const TICKER_MIN_ARC_PX = 14;
+// Floor fraction for politician arc distribution (matches Sunburst.tsx LABEL_FLOOR_ALPHA)
+const LABEL_FLOOR_ALPHA = 0.5;
+// Minimum labeled tickers to show regardless of arc size
+const MIN_VISIBLE_TICKERS = 4;
+
+// Collapse tickers that won't fit labeled arcs at the current chart size.
+// Mirrors enforceMinPoliticianArcs + enforceMinTickerArcs in Sunburst.tsx so the
+// pipeline's 200-ticker pool is trimmed to exactly what the chart can label.
+// Zoom state is passed so that zoomed parties/politicians get the correct (larger) arc.
+function collapseSmallTickers(
+  data: HierarchyData,
+  chartSize: number,
+  zoomedParty: string | null,
+  zoomedPolitician: string | null,
+): HierarchyData {
+  const radius        = chartSize / 2;
+  const ring2MidPx   = radius * RING2_MID_FRACTION;
+  const ring3MidPx   = radius * RING3_MID_FRACTION;
+  const minPolArcRad = 20 / ring2MidPx;       // MIN_ARC_PX[2] in radians
+  const minTickerRad = TICKER_MIN_ARC_PX / ring3MidPx;
+
+  // Include ALL politicians (visible + collapsed "N others") to match enforceMinPoliticianArcs
+  const totalVolume = data.children.reduce(
+    (s, party) => s + (party.children as PoliticianNode[])
+      .reduce((sp, p) => sp + p.total_volume, 0),
+    0,
+  );
+
   return {
     ...data,
-    children: data.children.map((party) => ({
-      ...party,
-      children: (party.children as PoliticianNode[]).map((politician) => {
-        const collapsedNode = politician.children.find((t) => t.collapsed);
-        if (!collapsedNode || (collapsedNode.collapsed_tickers?.length ?? 0) !== 1) return politician;
-        const onlyTicker = collapsedNode.collapsed_tickers![0];
-        return {
-          ...politician,
-          children: [
-            ...politician.children.filter((t) => !t.collapsed),
-            { name: onlyTicker.name, value: onlyTicker.value },
-          ],
-        };
-      }),
-    })),
+    children: data.children.map((party) => {
+      const allPols  = party.children as PoliticianNode[];
+      const partyVol = allPols.reduce((s, p) => s + p.total_volume, 0);
+      // Zoomed party fills the full circle; otherwise proportional
+      const partyArc = zoomedParty === party.name
+        ? 2 * Math.PI
+        : totalVolume > 0 ? (partyVol / totalVolume) * 2 * Math.PI : 0;
+      // n includes collapsed "N others" politician — matches enforceMinPoliticianArcs
+      const n        = allPols.length;
+      const polFloor = n > 0 && n * minPolArcRad <= partyArc
+        ? minPolArcRad
+        : n > 0 ? (partyArc / n) * LABEL_FLOOR_ALPHA : 0;
+      const remaining = Math.max(0, partyArc - n * polFloor);
+
+      return {
+        ...party,
+        children: allPols.map((pol) => {
+          if (pol.collapsed) return pol;
+          const fraction = partyVol > 0 ? pol.total_volume / partyVol : 1 / Math.max(n, 1);
+          // Zoomed politician fills the full circle
+          const polArc = zoomedPolitician === pol.name
+            ? 2 * Math.PI
+            : polFloor + fraction * remaining;
+          // Subtract 1 to reserve a slot for the potential "N others" collapsed node.
+          // Without this, n visible + 1 "N others" = n+1 total, which fails the
+          // enforceMinTickerArcs Case-1 check and drops all labels into Case 2.
+          const maxVisible = Math.max(Math.floor(polArc / minTickerRad) - 1, MIN_VISIBLE_TICKERS);
+
+          // Merge visible + pipeline's collapsed_tickers into one sorted pool
+          const visibleTickers = pol.children.filter((t) => !t.collapsed);
+          const existingOthers = pol.children.find((t) => t.collapsed);
+          const allTickers: { name: string; value: number }[] = [
+            ...visibleTickers.map((t) => ({ name: t.name, value: t.value })),
+            ...(existingOthers?.collapsed_tickers ?? []),
+          ];
+
+          const toShow   = allTickers.slice(0, maxVisible);
+          const leftover = allTickers.slice(maxVisible);
+
+          if (leftover.length === 0) {
+            return { ...pol, children: toShow };
+          }
+          if (leftover.length === 1) {
+            return { ...pol, children: [...toShow, { name: leftover[0].name, value: leftover[0].value }] };
+          }
+          const newOthers: TickerNode = {
+            name:              `${leftover.length} others`,
+            value:             leftover.reduce((s, t) => s + t.value, 0),
+            collapsed:         true,
+            collapsed_tickers: leftover,
+          };
+          return { ...pol, children: [...toShow, newOthers] };
+        }),
+      };
+    }),
   };
 }
 
@@ -123,12 +193,15 @@ function filterByAlpha(data: HierarchyData, minAlpha: number): HierarchyData {
 // Large groups use the side panel instead — inlining hundreds of tickers produces tiny slices.
 const MAX_INLINE_TICKER_EXPAND = 10;
 
-// When a politician is zoomed to fill 2π, expand their tickers from collapsed_tickers up to
-// this limit — the Case-1 capacity of the full ticker ring.
-// = floor(2π * (MAX_SIZE/2 * 7/8) / MIN_ARC_PX[3]) ≈ floor(2π * 350 / 14) ≈ 157
-const ZOOM_MAX_TICKERS = Math.floor(2 * Math.PI * (MAX_SIZE / 2) * (7 / 8) / 14);
+// When a politician is zoomed to fill 2π, expand their tickers from collapsed_tickers.
+// Limit is the Case-1 capacity of the full ticker ring at the actual chart size.
+// = floor(2π * radius * 7/8 / MIN_ARC_PX[3])
+function zoomMaxTickers(chartSize: number): number {
+  // Subtract 1 to reserve a slot for the potential "N others" node (same logic as collapseSmallTickers)
+  return Math.floor(2 * Math.PI * (chartSize / 2) * RING3_MID_FRACTION / TICKER_MIN_ARC_PX) - 1;
+}
 
-function expandForZoom(data: HierarchyData, politicianName: string): HierarchyData {
+function expandForZoom(data: HierarchyData, politicianName: string, maxTickers: number): HierarchyData {
   return {
     ...data,
     children: data.children.map((party) => ({
@@ -141,8 +214,8 @@ function expandForZoom(data: HierarchyData, politicianName: string): HierarchyDa
 
         // Merge visible + collapsed, sorted by value desc (already sorted from pipeline)
         const all      = [...visibleTickers, ...(othersNode.collapsed_tickers)];
-        const toShow   = all.slice(0, ZOOM_MAX_TICKERS);
-        const leftover = all.slice(ZOOM_MAX_TICKERS);
+const toShow   = all.slice(0, maxTickers);
+        const leftover = all.slice(maxTickers);
 
         if (leftover.length === 0) return { ...pol, children: toShow };
         if (leftover.length === 1) {
@@ -215,13 +288,18 @@ export default function App() {
     setTickerPanel({ politicianName, tickers });
   }, []);
 
-  // Step 1: filter + sanitize (no expansion yet)
+  // Step 1: filter + collapse (zoom state informs how many tickers to keep per politician)
   const filteredData = useMemo(() => {
     if (!data) return null;
-    return collapseSmallPoliticians(
-      sanitizeCollapsed(filterByCurrent(filterByAlpha(data, minAlpha), currentOnly))
+    return collapseSmallTickers(
+      collapseSmallPoliticians(
+        filterByCurrent(filterByAlpha(data, minAlpha), currentOnly)
+      ),
+      chartSize,
+      zoomedParty,
+      zoomedPolitician,
     );
-  }, [data, minAlpha, currentOnly]);
+  }, [data, minAlpha, currentOnly, chartSize, zoomedParty, zoomedPolitician]);
 
   // Step 2: merge manual expanded set with arc-width-based auto-expansion
   const effectiveExpanded = useMemo(() => {
@@ -252,9 +330,9 @@ export default function App() {
   const displayData = useMemo(() => {
     if (!filteredData) return null;
     let d = applyExpansions(filteredData, effectiveExpanded);
-    if (zoomedPolitician) d = expandForZoom(d, zoomedPolitician);
+    if (zoomedPolitician) d = expandForZoom(d, zoomedPolitician, zoomMaxTickers(chartSize));
     return d;
-  }, [filteredData, effectiveExpanded, zoomedPolitician]);
+  }, [filteredData, effectiveExpanded, zoomedPolitician, chartSize]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>Error: {error}</div>;
 
