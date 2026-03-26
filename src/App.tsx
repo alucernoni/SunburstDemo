@@ -149,8 +149,8 @@ function collapseSmallTickers(
           // Merge visible + pipeline's collapsed_tickers into one sorted pool
           const visibleTickers = pol.children.filter((t) => !t.collapsed);
           const existingOthers = pol.children.find((t) => t.collapsed);
-          const allTickers: { name: string; value: number }[] = [
-            ...visibleTickers.map((t) => ({ name: t.name, value: t.value })),
+          const allTickers: TickerNode[] = [
+            ...visibleTickers.map((t) => ({ name: t.name, value: t.value, alpha: t.alpha })),
             ...(existingOthers?.collapsed_tickers ?? []),
           ];
 

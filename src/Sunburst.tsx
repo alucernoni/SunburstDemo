@@ -89,8 +89,11 @@ function getTooltipHtml(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 3) {
     const node = d.data as unknown as TickerNode;
     const politician = d.parent?.data as unknown as PoliticianNode;
+    const alpha = node.collapsed ? null : (node.alpha ?? null);
+    const cls = alpha == null ? "" : alpha >= 0 ? "positive" : "negative";
     return `
       <div class="tt-title">${node.name}</div>
+      ${alpha != null ? `<div class="tt-row"><span>Alpha vs SPY</span><span class="${cls}">${formatAlpha(alpha)}</span></div>` : ""}
       <div class="tt-row"><span>Volume</span><span>${formatVolume(node.value)}</span></div>
       ${politician ? `<div class="tt-row"><span>Trader</span><span>${politician.name}</span></div>` : ""}
     `;
