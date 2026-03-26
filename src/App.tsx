@@ -76,12 +76,15 @@ const RING3_MID_FRACTION = 7 / 8;
 const TICKER_MIN_ARC_PX = 14;
 // Floor fraction for politician arc distribution (matches Sunburst.tsx LABEL_FLOOR_ALPHA)
 const LABEL_FLOOR_ALPHA = 0.5;
-// Minimum labeled tickers to show regardless of arc size
-const MIN_VISIBLE_TICKERS = 4;
+// No minimum — if the arc can't fit even one labeled ticker, collapse everything
+// into a single "N tickers" node so there are zero unlabeled slices.
+const MIN_VISIBLE_TICKERS = 0;
+// Minimum party arc in radians (matches Sunburst.tsx MIN_PARTY_ARC = 12°)
+const MIN_PARTY_ARC_RAD = (12 * Math.PI) / 180;
 
 // Collapse tickers that won't fit labeled arcs at the current chart size.
-// Mirrors enforceMinPoliticianArcs + enforceMinTickerArcs in Sunburst.tsx so the
-// pipeline's 200-ticker pool is trimmed to exactly what the chart can label.
+// Mirrors enforceMinPartyArcs + enforceMinPoliticianArcs + enforceMinTickerArcs in Sunburst.tsx
+// so the pipeline's 200-ticker pool is trimmed to exactly what the chart can label.
 // Zoom state is passed so that zoomed parties/politicians get the correct (larger) arc.
 function collapseSmallTickers(
   data: HierarchyData,
@@ -102,15 +105,26 @@ function collapseSmallTickers(
     0,
   );
 
+  // Replicate enforceMinPartyArcs: small parties get a floor of MIN_PARTY_ARC_RAD,
+  // and ALL parties are scaled uniformly so they still sum to 2π.
+  // Without this, parties like the tiny Independent party inflate total arc by taking a
+  // floor that steals space from Dems/Reps, causing polArc to be overestimated here.
+  const flooredPartyArcs = data.children.map((party) => {
+    const partyVol = (party.children as PoliticianNode[]).reduce((s, p) => s + p.total_volume, 0);
+    const rawArc   = totalVolume > 0 ? (partyVol / totalVolume) * 2 * Math.PI : 0;
+    return Math.max(rawArc, MIN_PARTY_ARC_RAD);
+  });
+  const partyArcScale = (2 * Math.PI) / flooredPartyArcs.reduce((s, a) => s + a, 0);
+
   return {
     ...data,
-    children: data.children.map((party) => {
+    children: data.children.map((party, partyIdx) => {
       const allPols  = party.children as PoliticianNode[];
       const partyVol = allPols.reduce((s, p) => s + p.total_volume, 0);
-      // Zoomed party fills the full circle; otherwise proportional
+      // Zoomed party fills the full circle; otherwise match enforceMinPartyArcs
       const partyArc = zoomedParty === party.name
         ? 2 * Math.PI
-        : totalVolume > 0 ? (partyVol / totalVolume) * 2 * Math.PI : 0;
+        : flooredPartyArcs[partyIdx] * partyArcScale;
       // n includes collapsed "N others" politician — matches enforceMinPoliticianArcs
       const n        = allPols.length;
       const polFloor = n > 0 && n * minPolArcRad <= partyArc
@@ -149,8 +163,13 @@ function collapseSmallTickers(
           if (leftover.length === 1) {
             return { ...pol, children: [...toShow, { name: leftover[0].name, value: leftover[0].value }] };
           }
+          // "N tickers" when everything is collapsed (nothing visible to be "other than");
+          // "N others" when some tickers are shown alongside the collapsed group.
+          const collapsedLabel = toShow.length === 0
+            ? `${leftover.length} tickers`
+            : `${leftover.length} others`;
           const newOthers: TickerNode = {
-            name:              `${leftover.length} others`,
+            name:              collapsedLabel,
             value:             leftover.reduce((s, t) => s + t.value, 0),
             collapsed:         true,
             collapsed_tickers: leftover,
