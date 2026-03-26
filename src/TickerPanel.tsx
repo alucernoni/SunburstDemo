@@ -12,8 +12,10 @@ const formatVolume = (v: number) =>
     ? `$${(v / 1_000_000).toFixed(1)}M`
     : `$${(v / 1_000).toFixed(0)}K`;
 
+const formatAlpha = (a: number | null | undefined) =>
+  a == null ? "—" : `${a >= 0 ? "+" : ""}${(a * 100).toFixed(1)}%`;
+
 export default function TickerPanel({ politicianName, tickers, onClose }: TickerPanelProps) {
-  const maxVol = Math.max(...tickers.map((t) => t.value));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -33,19 +35,18 @@ export default function TickerPanel({ politicianName, tickers, onClose }: Ticker
         </div>
 
         <div className="ticker-panel-list">
-          {tickers.map((t, i) => (
-            <div key={t.name} className="ticker-panel-row">
-              <span className="ticker-panel-rank">{i + 1}</span>
-              <span className="ticker-panel-symbol">{t.name}</span>
-              <div className="ticker-panel-bar-track">
-                <div
-                  className="ticker-panel-bar-fill"
-                  style={{ width: `${(t.value / maxVol) * 100}%` }}
-                />
+          {tickers.map((t, i) => {
+            const alpha = t.alpha ?? null;
+            const alphaClass = alpha == null ? "ticker-panel-alpha-na" : alpha >= 0 ? "ticker-panel-alpha-pos" : "ticker-panel-alpha-neg";
+            return (
+              <div key={t.name} className="ticker-panel-row">
+                <span className="ticker-panel-rank">{i + 1}</span>
+                <span className="ticker-panel-symbol">{t.name}</span>
+                <span className={alphaClass}>{formatAlpha(alpha)}</span>
+                <span className="ticker-panel-vol">{formatVolume(t.value)}</span>
               </div>
-              <span className="ticker-panel-vol">{formatVolume(t.value)}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="ticker-panel-footer">Click outside or press Esc to close</div>

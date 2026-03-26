@@ -371,7 +371,7 @@ body {
 
 .ticker-panel-row {
   display: grid;
-  grid-template-columns: 22px 52px 1fr 46px;
+  grid-template-columns: 22px 52px 52px 46px;
   align-items: center;
   gap: 6px;
   padding: 3px 0;
@@ -391,18 +391,24 @@ body {
   font-size: 12px;
 }
 
-.ticker-panel-bar-track {
-  height: 5px;
-  background: #1f2937;
-  border-radius: 3px;
-  overflow: hidden;
+.ticker-panel-alpha-pos {
+  color: #22C55E;
+  font-weight: 600;
+  font-size: 11px;
+  text-align: right;
 }
 
-.ticker-panel-bar-fill {
-  height: 100%;
-  background: #4b6baa;
-  border-radius: 3px;
-  min-width: 2px;
+.ticker-panel-alpha-neg {
+  color: #EF4444;
+  font-weight: 600;
+  font-size: 11px;
+  text-align: right;
+}
+
+.ticker-panel-alpha-na {
+  color: #4b5563;
+  font-size: 11px;
+  text-align: right;
 }
 
 .ticker-panel-vol {

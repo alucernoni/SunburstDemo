@@ -8,10 +8,12 @@ For each purchase transaction in trades.csv, computes:
 Aggregates to weighted alpha per politician:
   weighted_alpha = sum(alpha_i * amount_mid_i) / sum(amount_mid_i)  [purchases only]
 
-Also computes total_volume (all trades) and trade_count (all trades) per politician.
+Also computes total_volume (all trades) and trade_count (all trades) per politician,
+and weighted alpha per (politician, ticker) pair.
 
-Outputs: data/alphas.csv
-  columns: politician, party, weighted_alpha, total_volume, trade_count
+Outputs:
+  data/alphas.csv        — columns: politician, party, weighted_alpha, total_volume, trade_count
+  data/ticker_alphas.csv — columns: politician, ticker, weighted_alpha
 """
 
 import pandas as pd
@@ -20,9 +22,10 @@ import os
 from datetime import timedelta
 from fetch_prices import get_price_on_or_after, BENCHMARK
 
-TRADES_PATH = "data/trades.csv"
-ALPHAS_PATH = "data/alphas.csv"
-PRICES_DIR  = "data/prices"
+TRADES_PATH        = "data/trades.csv"
+ALPHAS_PATH        = "data/alphas.csv"
+TICKER_ALPHAS_PATH = "data/ticker_alphas.csv"
+PRICES_DIR         = "data/prices"
 
 ALPHA_WINDOW_DAYS = 365
 
@@ -132,6 +135,31 @@ def aggregate_by_politician(trades: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def aggregate_by_politician_ticker(trades: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregates purchase-weighted alpha per (politician, ticker) pair.
+    Only purchase rows with a valid alpha contribute.
+    Returns a DataFrame with columns: politician, ticker, weighted_alpha.
+    """
+    purchases = trades[
+        (trades["type"] == "purchase") & trades["alpha"].notna()
+    ].copy()
+
+    rows = []
+    for (politician, ticker), group in purchases.groupby(["politician", "ticker"]):
+        weights = group["amount_mid"]
+        if weights.sum() == 0:
+            continue
+        weighted_alpha = (group["alpha"] * weights).sum() / weights.sum()
+        rows.append({
+            "politician":     politician,
+            "ticker":         ticker,
+            "weighted_alpha": weighted_alpha,
+        })
+
+    return pd.DataFrame(rows)
+
+
 def main():
     os.makedirs("data", exist_ok=True)
     today = pd.Timestamp.today().normalize()
@@ -153,6 +181,13 @@ def main():
 
     alphas.to_csv(ALPHAS_PATH, index=False)
     print(f"  Saved → {ALPHAS_PATH}")
+
+    print("Aggregating by politician × ticker...")
+    ticker_alphas = aggregate_by_politician_ticker(trades_with_alpha)
+    print(f"  {len(ticker_alphas)} (politician, ticker) pairs")
+
+    ticker_alphas.to_csv(TICKER_ALPHAS_PATH, index=False)
+    print(f"  Saved → {TICKER_ALPHAS_PATH}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 export interface CollapsedTicker {
   name: string;
   value: number;
+  alpha?: number | null;
 }
 
 export interface TickerNode {
