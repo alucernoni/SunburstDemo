@@ -311,6 +311,30 @@ function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
 const prefersReducedMotion = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+function getAriaLabel(d: d3.HierarchyRectangularNode<HierarchyData>): string {
+  if (d.depth === 1) {
+    const name = (d.data as { name: string }).name;
+    return `${name} party, total volume ${formatVolume(d.value ?? 0)}`;
+  }
+  if (d.depth === 2) {
+    const node = d.data as unknown as PoliticianNode;
+    if (node.collapsed) {
+      return `${node.name} collapsed politicians, volume ${formatVolume(node.total_volume)}`;
+    }
+    const label = parsePoliticianName(node.name).display;
+    const alpha = node.weighted_alpha;
+    return `${label}, alpha ${formatAlpha(alpha)}, volume ${formatVolume(node.total_volume)}`;
+  }
+  if (d.depth === 3) {
+    const node = d.data as unknown as TickerNode;
+    if (node.collapsed) {
+      return `${node.name}, volume ${formatVolume(node.value)}`;
+    }
+    return `${node.name}, alpha ${formatAlpha(node.alpha ?? null)}, volume ${formatVolume(node.value)}`;
+  }
+  return "";
+}
+
 export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onCollapsedPoliticiansClick, onShowTickerPanel }: SunburstProps) {
   const svgRef      = useRef<SVGSVGElement>(null);
   const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
@@ -321,7 +345,16 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
   // One-time setup: create the <g> and tooltip
   useEffect(() => {
     if (!svgRef.current) return;
-    gRef.current = d3.select(svgRef.current).append("g");
+    const svg = d3.select(svgRef.current);
+    svg.attr("role", "img")
+       .attr("aria-label", "Congressional stock trading sunburst chart");
+    svg.append("title").text("Congressional Stock Trading");
+    svg.append("desc").text(
+      "Interactive sunburst chart showing U.S. congressional stock trades. " +
+      "Inner ring: political party. Middle ring: individual legislators, sized by trading volume and colored by alpha vs S&P 500. " +
+      "Outer ring: individual stock tickers. Click a ring segment to zoom in; click again to zoom out."
+    );
+    gRef.current = svg.append("g");
     const cg = gRef.current.append("g").attr("class", "center-label").attr("pointer-events", "none");
     cg.append("text").attr("class", "center-count").attr("text-anchor", "middle");
     cg.append("text").attr("class", "center-sub").attr("text-anchor", "middle");
@@ -330,6 +363,9 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       .select("body")
       .append("div")
       .attr("class", "sunburst-tooltip")
+      .attr("role", "status")
+      .attr("aria-live", "polite")
+      .attr("aria-atomic", "true")
       .style("opacity", 0);
     return () => {
       tooltipRef.current?.remove();
@@ -413,10 +449,12 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         (enter) =>
           enter
             .append("path")
+            .attr("role", "img")
             .attr("fill", getArcColor)
             .attr("stroke", "#111")
             .attr("stroke-width", 0.5)
             .attr("stroke-dasharray", "none")
+            .attr("aria-label", getAriaLabel)
             .style("cursor", "pointer")
             .each(function (d) {
               // Store initial angles so first render has no tween artifact
@@ -425,10 +463,12 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
             .attr("d", (d) => arc(d) ?? ""),
         (update) =>
           update
+            .attr("role", "img")
             .attr("fill", getArcColor)
             .attr("stroke", "#111")
             .attr("stroke-width", 0.5)
             .attr("stroke-dasharray", "none")
+            .attr("aria-label", getAriaLabel)
             .transition()
             .duration(prefersReducedMotion() ? 0 : 600)
             .attrTween("d", function (d) {
@@ -549,7 +589,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         .attr("dy", "1.1em")
         .attr("font-size", Math.max(9, Math.round(countFontSize * 0.38)))
         .attr("letter-spacing", "0.05em")
-        .attr("fill", "#6b7280")
+        .attr("fill", "#94a3b8")
         .text("active traders");
     }
 

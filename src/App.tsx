@@ -390,13 +390,14 @@ export default function App() {
             <h1 className="app-title">Congressional Stock Trading</h1>
             <div className="controls">
               <div className="controls-row">
-                <label className="slider-label">
+                <label className="slider-label" htmlFor="min-alpha-slider">
                   Min Alpha vs SPY
                   <span className="slider-value" style={{ color: minAlpha >= 0 ? "#22C55E" : "#EF4444" }}>
                     {alphaLabel}
                   </span>
                 </label>
                 <input
+                  id="min-alpha-slider"
                   type="range"
                   min={SLIDER_MIN}
                   max={SLIDER_MAX}
@@ -404,6 +405,7 @@ export default function App() {
                   value={minAlpha}
                   onChange={(e) => setMinAlpha(parseFloat(e.target.value))}
                   className="slider"
+                  aria-valuetext={alphaLabel}
                 />
                 <span className="slider-count">{visibleCount} shown</span>
                 <label className="toggle-label">
