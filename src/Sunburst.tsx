@@ -308,6 +308,9 @@ function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return "rgba(255,255,255,0.88)";
 }
 
+const prefersReducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export default function Sunburst({ data, totalPoliticians, width = 800, height = 800, expandedPoliticians, zoomedParty, onPartyClick, zoomedPolitician, onPoliticianClick, onCollapsedPoliticiansClick, onShowTickerPanel }: SunburstProps) {
   const svgRef      = useRef<SVGSVGElement>(null);
   const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
@@ -427,7 +430,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
             .attr("stroke-width", 0.5)
             .attr("stroke-dasharray", "none")
             .transition()
-            .duration(600)
+            .duration(prefersReducedMotion() ? 0 : 600)
             .attrTween("d", function (d) {
               const key  = nodeKey(d);
               const prev = prevAngles.current.get(key) ?? { x0: d.x0, x1: d.x1, y0: d.y0, y1: d.y1 };
@@ -437,7 +440,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
               return (t: number) => arc(interp(t)) ?? "";
             }),
         (exit) =>
-          exit.transition().duration(300).style("opacity", 0).remove()
+          exit.transition().duration(prefersReducedMotion() ? 0 : 300).style("opacity", 0).remove()
       )
       .on("click", (_event: MouseEvent, d) => {
         if (d.depth === 1) {
@@ -516,10 +519,10 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
             .attr("font-size", getLabelFontSize)
             .attr("fill", getLabelColor)
             .transition()
-            .duration(600)
+            .duration(prefersReducedMotion() ? 0 : 600)
             .attr("transform", getLabelTransform),
         (exit) =>
-          exit.transition().duration(300).style("opacity", 0).remove()
+          exit.transition().duration(prefersReducedMotion() ? 0 : 300).style("opacity", 0).remove()
       );
 
     // Center label — count of visible politicians (update in place, no remove/reappend)

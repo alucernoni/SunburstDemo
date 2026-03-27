@@ -181,6 +181,11 @@ svg text {
   to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: #64748b; }
+  * { transition-duration: 0ms !important; }
+}
+
 /* ── Legend ── */
 .legend {
   position: absolute;
