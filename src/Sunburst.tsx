@@ -82,9 +82,9 @@ function getArcColor(d: d3.HierarchyRectangularNode<HierarchyData>): string {
     if (node.weighted_alpha == null) return PARTY_COLORS["Other"];
     return alphaColor(node.weighted_alpha);
   }
-  const node = d.parent?.data as unknown as PoliticianNode;
-  if (node?.weighted_alpha != null) {
-    return d3.color(alphaColor(node.weighted_alpha))!.copy({ opacity: 0.6 }).formatRgb();
+  const ticker = d.data as unknown as TickerNode;
+  if (ticker.alpha != null) {
+    return d3.color(alphaColor(ticker.alpha))!.copy({ opacity: 0.75 }).formatRgb();
   }
   return "#4B5563";
 }

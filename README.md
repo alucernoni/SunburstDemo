@@ -12,7 +12,7 @@ The chart has three concentric rings:
 |---|---|---|---|
 | Inner | Party | Trading volume | Party (blue / orange / purple) |
 | Middle | Politician | Trading volume | Alpha vs S&P 500 (green → gray → red) |
-| Outer | Stock ticker | Trading volume | Parent politician's alpha (lighter) |
+| Outer | Stock ticker | Trading volume | Alpha vs S&P 500 for that ticker (lighter shade) |
 
 **Alpha** is calculated on purchase transactions only — sales can be non-discretionary, purchases are deliberate bets. Each purchase is benchmarked against SPY over the same 1-year holding window. Politician alpha is volume-weighted across all their purchases.
 
