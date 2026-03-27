@@ -279,10 +279,17 @@ function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
 function getLabelTransform(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   const angle  = (d.x0 + d.x1) / 2;          // midpoint angle in radians
   const r      = (d.y0 + d.y1) / 2;           // midpoint radius
-  // When any ring is zoomed to fill the full circle (arc > 270°) the tangent formula puts
-  // the label at the bottom oriented vertically. Pin it horizontally at the top instead.
-  if ((d.depth === 1 || d.depth === 2) && (d.x1 - d.x0) > 1.5 * Math.PI) {
-    return `translate(0, -${r})`;
+  // When a ring is zoomed to fill the full circle (arc > 270°), the tangent formula puts
+  // the label at the bottom oriented vertically. Pin it near the top instead.
+  if ((d.x1 - d.x0) > 1.5 * Math.PI) {
+    if (d.depth === 2) {
+      // Zoomed politician — always centered at the top, only one party visible
+      return `translate(0, -${r})`;
+    }
+    // Depth-1 party with a large arc: offset 20° inside from the arc start so the label
+    // doesn't straddle the boundary with the adjacent small party (which also sits near 12-o'clock).
+    const labelAngle = d.x0 + 0.35;
+    return `translate(${r * Math.sin(labelAngle)}, ${-r * Math.cos(labelAngle)})`;
   }
   const deg    = angle * 180 / Math.PI - 90;   // rotate to tangent, offset for SVG 0=right
   const flip   = angle > Math.PI ? 180 : 0;    // keep text right-side up in lower half
@@ -404,9 +411,9 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           enter
             .append("path")
             .attr("fill", getArcColor)
-            .attr("stroke", (d) => (isCollapsed(d) || isCollapsedPolitician(d)) ? "#fff" : "#111")
-            .attr("stroke-width", (d) => (isCollapsed(d) || isCollapsedPolitician(d)) ? 1.5 : 0.5)
-            .attr("stroke-dasharray", (d) => (isCollapsed(d) || isCollapsedPolitician(d)) ? "3,2" : "none")
+            .attr("stroke", "#111")
+            .attr("stroke-width", 0.5)
+            .attr("stroke-dasharray", "none")
             .style("cursor", "pointer")
             .each(function (d) {
               // Store initial angles so first render has no tween artifact
@@ -416,9 +423,9 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         (update) =>
           update
             .attr("fill", getArcColor)
-            .attr("stroke", (d) => (isCollapsed(d) || isCollapsedPolitician(d)) ? "#fff" : "#111")
-            .attr("stroke-width", (d) => (isCollapsed(d) || isCollapsedPolitician(d)) ? 1.5 : 0.5)
-            .attr("stroke-dasharray", (d) => (isCollapsed(d) || isCollapsedPolitician(d)) ? "3,2" : "none")
+            .attr("stroke", "#111")
+            .attr("stroke-width", 0.5)
+            .attr("stroke-dasharray", "none")
             .transition()
             .duration(600)
             .attrTween("d", function (d) {
@@ -465,7 +472,8 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       .on("mouseover", (event: MouseEvent, d) => {
         d3.select(event.currentTarget as Element)
           .attr("stroke", "#fff")
-          .attr("stroke-width", 1.5);
+          .attr("stroke-width", 1.5)
+          .attr("stroke-dasharray", (isCollapsed(d) || isCollapsedPolitician(d)) ? "3,2" : "none");
         tooltip.html(getTooltipHtml(d)).style("opacity", 1);
       })
       .on("mousemove", (event: MouseEvent) => {
@@ -476,7 +484,8 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       .on("mouseout", (event: MouseEvent) => {
         d3.select(event.currentTarget as Element)
           .attr("stroke", "#111")
-          .attr("stroke-width", 0.5);
+          .attr("stroke-width", 0.5)
+          .attr("stroke-dasharray", "none");
         tooltip.style("opacity", 0);
       });
 

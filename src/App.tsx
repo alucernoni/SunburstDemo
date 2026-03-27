@@ -58,6 +58,14 @@ function collapseSmallPoliticians(data: HierarchyData, expandedPolParty: string 
       const hidden        = isExpanded ? toKeep     : toCollapse;
       const hiddenVol     = hidden.reduce((s, p) => s + p.total_volume, 0);
 
+      // When expanded the hidden group is the large politicians — using their combined volume
+      // would make the "N others" node dominate the arc. Instead size it like one slot in
+      // the small-politician context (= the largest visible politician), so it stays visible
+      // but doesn't swamp the politicians the user is trying to explore.
+      const othersValue   = isExpanded
+        ? Math.max(...visible.map((p) => p.total_volume))
+        : hiddenVol;
+
       const othersNode: PoliticianNode = {
         name:           `${hidden.length} others`,
         party_code:     politicians[0]?.party_code ?? "",
@@ -66,7 +74,7 @@ function collapseSmallPoliticians(data: HierarchyData, expandedPolParty: string 
         trade_count:    hidden.reduce((s, p) => s + p.trade_count, 0),
         is_current:     false,
         collapsed:      true,
-        value:          hiddenVol,  // D3's .sum() uses this since children: [] gives no leaf sum
+        value:          othersValue,  // D3's .sum() uses this since children: [] gives no leaf sum
         children:       [],
       };
 
@@ -310,6 +318,13 @@ export default function App() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
+  // Clear the expanded-politicians panel if the user manually navigates away from that party
+  useEffect(() => {
+    if (expandedPolParty !== null && zoomedParty !== expandedPolParty) {
+      setExpandedPolParty(null);
+    }
+  }, [zoomedParty, expandedPolParty]);
+
   const handleShowTickerPanel = useCallback((politicianName: string, tickers: CollapsedTicker[]) => {
     setTickerPanel({ politicianName, tickers });
   }, []);
@@ -427,9 +442,11 @@ export default function App() {
                 onPartyClick={setZoomedParty}
                 zoomedPolitician={zoomedPolitician}
                 onPoliticianClick={setZoomedPolitician}
-                onCollapsedPoliticiansClick={(partyName) =>
-                  setExpandedPolParty((prev) => (prev === partyName ? null : partyName))
-                }
+                onCollapsedPoliticiansClick={(partyName) => {
+                  const isExpanding = expandedPolParty !== partyName;
+                  setExpandedPolParty(isExpanding ? partyName : null);
+                  setZoomedParty(isExpanding ? partyName : null);
+                }}
                 onShowTickerPanel={handleShowTickerPanel}
               />
             )}
