@@ -75,7 +75,7 @@ Required input files in `pipeline/data/raw/`:
 
 | File | Source |
 |---|---|
-| `congress-trading-all.csv` | [Kaggle — Congress Trading](https://www.kaggle.com/datasets/kapturovalexander/congress-trading-all) |
+| `congress-trading-all.csv` | [Kaggle — Congressional Trading](https://www.kaggle.com/datasets/shabbarank/congressional-trading-inception-to-march-23?resource=download) |
 | `legislators-current.csv` | [unitedstates/congress-legislators](https://github.com/unitedstates/congress-legislators) |
 
 ### 3. Start the dev server
