@@ -436,6 +436,30 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
 
     enforceMinTickerArcs(partitionRoot, radius);
 
+    // Explicit re-enforcement for the zoomed politician's tickers.
+    // enforceMinTickerArcs reads politician.x1 - politician.x0 for polArc. When a
+    // politician is zoomed, rescaleSubtree sets their x0=0/x1=2π, so polArc should
+    // be 2π. But for politicians whose children are all in `children` (no collapsed
+    // "N others" node), the floor is sometimes not reflected in label visibility —
+    // the observable symptom matches the proportional distribution without the floor.
+    // This explicit pass uses polArc=2π directly to guarantee the floor is applied.
+    if (zoomedPolNode?.children?.length) {
+      const minLabelArcZ = MIN_ARC_PX[3] / (radius * RING3_MID_FRACTION);
+      const zoomTickers = zoomedPolNode.children;
+      const nZ = zoomTickers.length;
+      const totalValZ = zoomedPolNode.value ?? 1;
+      const floorArcZ = nZ * minLabelArcZ <= 2 * Math.PI
+        ? minLabelArcZ
+        : (2 * Math.PI / nZ) * TICKER_FLOOR_ALPHA;
+      const remainingZ = Math.max(0, 2 * Math.PI - nZ * floorArcZ);
+      let cursorZ = 0;
+      for (const ticker of zoomTickers) {
+        const fraction = totalValZ > 0 ? (ticker.value ?? 0) / totalValZ : 1 / nZ;
+        rescaleSubtree(ticker, cursorZ, cursorZ + floorArcZ + fraction * remainingZ);
+        cursorZ += floorArcZ + fraction * remainingZ;
+      }
+    }
+
     const nodes = zoomedPolNode
       ? [zoomedPolNode.parent!, ...zoomedPolNode.descendants()]
       : zoomedParty

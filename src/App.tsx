@@ -243,7 +243,24 @@ function expandForZoom(data: HierarchyData, politicianName: string, maxTickers: 
         if (pol.name !== politicianName) return pol;
         const visibleTickers  = pol.children.filter((t) => !t.collapsed);
         const othersNode      = pol.children.find((t) => t.collapsed);
-        if (!othersNode?.collapsed_tickers?.length) return pol;
+        // applyExpansions may have inlined a small "N others" group before we get here,
+        // leaving all tickers visible but count > maxTickers. Collapse the excess so
+        // enforceMinTickerArcs stays in Case 1 (all tickers fit with labeled arcs).
+        if (!othersNode?.collapsed_tickers?.length) {
+          if (visibleTickers.length <= maxTickers) return pol;
+          const toShow   = visibleTickers.slice(0, maxTickers);
+          const leftover = visibleTickers.slice(maxTickers);
+          if (leftover.length === 1) {
+            return { ...pol, children: [...toShow, { name: leftover[0].name, value: leftover[0].value }] };
+          }
+          const newOthers: TickerNode = {
+            name:              `${leftover.length} others`,
+            value:             leftover.reduce((s, t) => s + t.value, 0),
+            collapsed:         true,
+            collapsed_tickers: leftover,
+          };
+          return { ...pol, children: [...toShow, newOthers] };
+        }
 
         // Merge visible + collapsed, sorted by value desc (already sorted from pipeline)
         const all      = [...visibleTickers, ...(othersNode.collapsed_tickers)];
