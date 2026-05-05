@@ -326,7 +326,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetch("/hierarchy.json")
+    fetch(`${import.meta.env.BASE_URL}hierarchy.json`)
       .then((r) => {
         if (!r.ok) throw new Error(`Failed to load hierarchy.json (${r.status})`);
         return r.json() as Promise<HierarchyData>;
