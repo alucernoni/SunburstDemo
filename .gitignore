@@ -12,7 +12,6 @@ __pycache__/
 # Data (generated — not committed)
 data/
 pipeline/data/
-public/hierarchy.json
 
 # OS
 .DS_Store
