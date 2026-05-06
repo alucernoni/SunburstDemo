@@ -311,12 +311,7 @@ function arcLength(d: d3.HierarchyRectangularNode<HierarchyData>): number {
 }
 
 function getLabelFontSize(d: d3.HierarchyRectangularNode<HierarchyData>): number {
-  if (d.depth === 1) {
-    const text = getLabelText(d);
-    const maxFromArc = Math.floor((arcLength(d) * 0.85) / (text.length * 0.6));
-    return Math.min(11, Math.max(7, maxFromArc));
-  }
-  return d.depth === 2 ? 9 : 8;
+  return d.depth === 1 ? 11 : d.depth === 2 ? 9 : 8;
 }
 
 function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
@@ -399,6 +394,16 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
 
     const tooltip = tooltipRef.current;
     const radius  = Math.min(width, height) / 2;
+
+    // Depth-1 font: scale with radius (11px at radius≥275, smaller below) and
+    // cap by available arc length so the label never overflows its segment.
+    const depth1FontBase = Math.max(7, Math.min(11, Math.round(radius / 25)));
+    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number => {
+      if (d.depth !== 1) return getLabelFontSize(d);
+      const text = getLabelText(d);
+      const maxFromArc = Math.floor((arcLength(d) * 0.85) / (text.length * 0.6));
+      return Math.min(depth1FontBase, Math.max(6, maxFromArc));
+    };
 
     d3.select(svgRef.current).attr("width", width).attr("height", height);
     gRef.current.attr("transform", `translate(${width / 2}, ${height / 2})`);
@@ -591,14 +596,10 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       }, { passive: false } as AddEventListenerOptions);
 
     // Labels
-    const labelNodes = nodes.filter((d) => {
-      if (d.depth === 1) {
-        // Show if the (possibly abbreviated) text fits at minimum 7px font
-        const text = getLabelText(d);
-        return arcLength(d) >= text.length * 7 * 0.6;
-      }
-      return arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999);
-    });
+    // MIN_ARC_PX[1] = 0 so party labels always show; font-size closure handles fitting.
+    const labelNodes = nodes.filter(
+      (d) => arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999)
+    );
 
     gRef.current
       .selectAll<SVGTextElement, d3.HierarchyRectangularNode<HierarchyData>>("text.arc-label")
@@ -611,7 +612,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
             .attr("transform", getLabelTransform)
             .attr("text-anchor", "middle")
             .attr("dominant-baseline", "middle")
-            .attr("font-size", getLabelFontSize)
+            .attr("font-size", labelFontSize)
             .attr("fill", getLabelColor)
             .attr("pointer-events", "none")
             .style("user-select", "none")
@@ -619,7 +620,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         (update) =>
           update
             .text(getLabelText)
-            .attr("font-size", getLabelFontSize)
+            .attr("font-size", labelFontSize)
             .attr("fill", getLabelColor)
             .transition()
             .duration(prefersReducedMotion() ? 0 : 600)
