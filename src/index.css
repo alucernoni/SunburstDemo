@@ -311,6 +311,17 @@ svg text {
 .sunburst-tooltip .positive { color: #22C55E; }
 .sunburst-tooltip .negative { color: #EF4444; }
 
+/* Touch devices: anchor tooltip to bottom-center instead of following the cursor */
+.sunburst-tooltip.touch-tooltip {
+  position: fixed !important;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  top: auto !important;
+  max-width: calc(100vw - 32px);
+  min-width: 220px;
+}
+
 /* ── Ticker Panel ── */
 .ticker-panel-backdrop {
   position: absolute;
@@ -430,4 +441,61 @@ svg text {
   color: #64748b;
   text-align: center;
   flex-shrink: 0;
+}
+
+/* ── Mobile layout (≤ 640px) ─────────────────────────────────────────────────
+   Must come AFTER all base rules so same-specificity overrides win via cascade.
+   ─────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .app-layout {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  /* Allow controls to wrap on narrow screens */
+  .controls-row {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    justify-content: center;
+  }
+
+  /* Legend: pulled out of absolute flow → sits inline between controls and chart */
+  .legend {
+    position: static;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    padding: 10px 14px;
+    align-items: flex-start;
+  }
+
+  /* Each legend section lays out horizontally */
+  .legend-section {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .legend-swatches {
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  /* Hide mouse-specific interaction hints on touch devices */
+  .legend-hints {
+    display: none;
+  }
+
+  /* Chart area stays square, fills remaining height */
+  .chart-area {
+    aspect-ratio: 1;
+    max-height: calc(100vw - 20px);
+  }
+
+  /* Ticker panel fills available width */
+  .ticker-panel {
+    width: calc(100vw - 32px);
+  }
 }

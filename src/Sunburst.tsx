@@ -340,7 +340,8 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
   const gRef        = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const tooltipRef  = useRef<d3.Selection<HTMLDivElement, unknown, HTMLElement, unknown> | null>(null);
   const centerRef   = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
-  const prevAngles  = useRef<Map<string, ArcAngles>>(new Map());
+  const prevAngles     = useRef<Map<string, ArcAngles>>(new Map());
+  const touchTimerRef  = useRef<number | null>(null);
 
   // One-time setup: create the <g> and tooltip
   useEffect(() => {
@@ -373,6 +374,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       gRef.current?.remove();
       gRef.current = null;
       centerRef.current = null;
+      if (touchTimerRef.current !== null) clearTimeout(touchTimerRef.current);
     };
   }, []);
 
@@ -554,7 +556,24 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           .attr("stroke-width", 0.5)
           .attr("stroke-dasharray", "none");
         tooltip.style("opacity", 0);
-      });
+      })
+      .on("touchstart.tooltip", (event: TouchEvent, d) => {
+        event.preventDefault();
+        if (touchTimerRef.current !== null) {
+          clearTimeout(touchTimerRef.current);
+          touchTimerRef.current = null;
+        }
+        tooltip
+          .html(getTooltipHtml(d))
+          .classed("touch-tooltip", true)
+          .style("left", null)
+          .style("top", null)
+          .style("opacity", 1);
+        touchTimerRef.current = window.setTimeout(() => {
+          tooltip.style("opacity", 0).classed("touch-tooltip", false);
+          touchTimerRef.current = null;
+        }, 3000);
+      }, { passive: false } as AddEventListenerOptions);
 
     // Labels
     const labelNodes = nodes.filter(

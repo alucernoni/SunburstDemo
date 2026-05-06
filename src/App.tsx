@@ -438,6 +438,8 @@ export default function App() {
             </div>
           </header>
 
+          <Legend />
+
           <div ref={chartAreaRef} className="chart-area">
             {!displayData ? (
               <div className="spinner-wrapper">
@@ -471,7 +473,6 @@ export default function App() {
             )}
           </div>
         </div>
-        <Legend />
         {tickerPanel && (
           <TickerPanel
             politicianName={tickerPanel.politicianName}
