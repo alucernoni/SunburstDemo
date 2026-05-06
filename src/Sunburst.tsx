@@ -263,8 +263,18 @@ function enforceMinTickerArcs(
 // Minimum arc length (px) at midpoint radius required to show a label
 const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 20, 3: 14 };
 
+const PARTY_ABBREV: Record<string, string> = {
+  Democratic: "Dem.", Republican: "Rep.", Independent: "Ind.",
+};
+
 function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
-  if (d.depth === 1) return (d.data as { name: string }).name;
+  if (d.depth === 1) {
+    const name = (d.data as { name: string }).name;
+    // Abbreviate when the full name won't fit at the base 11px font size
+    return arcLength(d) < name.length * 11 * 0.6
+      ? (PARTY_ABBREV[name] ?? name.slice(0, 4) + ".")
+      : name;
+  }
   if (d.depth === 2) {
     const node = d.data as unknown as PoliticianNode;
     if (node.collapsed) return node.name; // "N others" — show as-is
@@ -301,7 +311,12 @@ function arcLength(d: d3.HierarchyRectangularNode<HierarchyData>): number {
 }
 
 function getLabelFontSize(d: d3.HierarchyRectangularNode<HierarchyData>): number {
-  return d.depth === 1 ? 11 : d.depth === 2 ? 9 : 8;
+  if (d.depth === 1) {
+    const text = getLabelText(d);
+    const maxFromArc = Math.floor((arcLength(d) * 0.85) / (text.length * 0.6));
+    return Math.min(11, Math.max(7, maxFromArc));
+  }
+  return d.depth === 2 ? 9 : 8;
 }
 
 function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
@@ -576,9 +591,14 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       }, { passive: false } as AddEventListenerOptions);
 
     // Labels
-    const labelNodes = nodes.filter(
-      (d) => arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999)
-    );
+    const labelNodes = nodes.filter((d) => {
+      if (d.depth === 1) {
+        // Show if the (possibly abbreviated) text fits at minimum 7px font
+        const text = getLabelText(d);
+        return arcLength(d) >= text.length * 7 * 0.6;
+      }
+      return arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999);
+    });
 
     gRef.current
       .selectAll<SVGTextElement, d3.HierarchyRectangularNode<HierarchyData>>("text.arc-label")
