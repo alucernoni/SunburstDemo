@@ -621,13 +621,16 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           return sum + 1;
         }, 0);
       const innerRadius = radius / (partitionRoot.height + 1);
-      const countFontSize = Math.min(Math.round(innerRadius * 0.55), 28);
+      const countText = `${activeCount} / ${totalPoliticians}`;
+      // Cap font size so the text fits within the inner circle (each char ≈ 0.6× font-size wide)
+      const maxFontFromWidth = Math.floor((innerRadius * 2 * 0.85) / (countText.length * 0.6));
+      const countFontSize = Math.min(Math.round(innerRadius * 0.55), 28, maxFontFromWidth);
       centerRef.current.select(".center-count")
         .attr("dy", "-0.25em")
         .attr("font-size", countFontSize)
         .attr("font-weight", "700")
         .attr("fill", "#f3f4f6")
-        .text(`${activeCount} / ${totalPoliticians}`);
+        .text(countText);
       centerRef.current.select(".center-sub")
         .attr("dy", "1.1em")
         .attr("font-size", Math.max(9, Math.round(countFontSize * 0.38)))
