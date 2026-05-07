@@ -270,8 +270,8 @@ const PARTY_ABBREV: Record<string, string> = {
 function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
   if (d.depth === 1) {
     const name = (d.data as { name: string }).name;
-    // Abbreviate when the full name won't fit at the base 11px font size
-    return arcLength(d) < name.length * 11 * 0.6
+    // Abbreviate only when the arc is truly tiny (mobile-sized, ~18px threshold)
+    return arcLength(d) < 18
       ? (PARTY_ABBREV[name] ?? name.slice(0, 4) + ".")
       : name;
   }
@@ -395,15 +395,11 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
     const tooltip = tooltipRef.current;
     const radius  = Math.min(width, height) / 2;
 
-    // Depth-1 font: scale with radius (11px at radius≥275, smaller below) and
-    // cap by available arc length so the label never overflows its segment.
+    // Depth-1 font: scale with radius (11px at radius≥275, 7px at mobile).
+    // No arc-length cap — getLabelText already abbreviates when arc is tiny.
     const depth1FontBase = Math.max(7, Math.min(11, Math.round(radius / 25)));
-    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number => {
-      if (d.depth !== 1) return getLabelFontSize(d);
-      const text = getLabelText(d);
-      const maxFromArc = Math.floor((arcLength(d) * 0.85) / (text.length * 0.6));
-      return Math.min(depth1FontBase, Math.max(6, maxFromArc));
-    };
+    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number =>
+      d.depth !== 1 ? getLabelFontSize(d) : depth1FontBase;
 
     d3.select(svgRef.current).attr("width", width).attr("height", height);
     gRef.current.attr("transform", `translate(${width / 2}, ${height / 2})`);
