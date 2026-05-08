@@ -365,9 +365,11 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       "Outer ring: individual stock tickers. Click a ring segment to zoom in; click again to zoom out."
     );
     gRef.current = svg.append("g");
-    const cg = gRef.current.append("g").attr("class", "center-label").attr("pointer-events", "none");
-    cg.append("text").attr("class", "center-count").attr("text-anchor", "middle");
-    cg.append("text").attr("class", "center-sub").attr("text-anchor", "middle");
+    const cg = gRef.current.append("g").attr("class", "center-label");
+    // Transparent hit area — radius and click handler set in data useEffect
+    cg.append("circle").attr("class", "center-hit").attr("fill", "transparent");
+    cg.append("text").attr("class", "center-count").attr("text-anchor", "middle").attr("pointer-events", "none");
+    cg.append("text").attr("class", "center-sub").attr("text-anchor", "middle").attr("pointer-events", "none");
     centerRef.current = cg;
     tooltipRef.current = d3
       .select("body")
@@ -658,6 +660,11 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           return sum + 1;
         }, 0);
       const innerRadius = radius / (partitionRoot.height + 1);
+      const isZoomed = !!(zoomedParty || zoomedPolitician);
+      centerRef.current.select(".center-hit")
+        .attr("r", innerRadius)
+        .style("cursor", isZoomed ? "pointer" : "default")
+        .on("click", isZoomed ? () => { onPartyClick?.(null); onPoliticianClick?.(null); } : () => {});
       const countText = `${activeCount} / ${totalPoliticians}`;
       // Cap font size so the text fits within the inner circle (each char ≈ 0.6× font-size wide)
       const maxFontFromWidth = Math.floor((innerRadius * 2 * 0.85) / (countText.length * 0.6));
