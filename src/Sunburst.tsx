@@ -484,10 +484,14 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
     // arc-length-driven size among all visible siblings, then apply it to all.
     const parentFontSize = new Map<string, number>();
     for (const d of nodes) {
-      if ((d.depth === 2 || d.depth === 3) && d.parent && arcLength(d) >= MIN_ARC_PX[d.depth]) {
+      if (!d.parent) continue;
+      // Depth-3 crowded floor can produce arcs smaller than MIN_ARC_PX[3]; include
+      // those down to 5px so the group font size accounts for all visible siblings.
+      const minVisible = d.depth === 3 ? 5 : MIN_ARC_PX[d.depth] ?? 999;
+      if ((d.depth === 2 || d.depth === 3) && arcLength(d) >= minVisible) {
         const key = nodeKey(d.parent);
         const a = arcLength(d);
-        const fs = d.depth === 2 ? (a >= 18 ? 9 : a >= 10 ? 8 : 7) : (a >= 14 ? 8 : 7);
+        const fs = d.depth === 2 ? (a >= 18 ? 9 : a >= 10 ? 8 : 7) : (a >= 14 ? 8 : a >= 10 ? 7 : 6);
         parentFontSize.set(key, Math.min(parentFontSize.get(key) ?? 99, fs));
       }
     }
@@ -606,9 +610,12 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
 
     // Labels
     // MIN_ARC_PX[1] = 0 so party labels always show; font-size closure handles fitting.
-    const labelNodes = nodes.filter(
-      (d) => arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999)
-    );
+    // Depth-3 uses a lower filter (5px) because the crowded floor in enforceMinTickerArcs
+    // can produce arcs smaller than MIN_ARC_PX[3]; font scales down to 6px for those.
+    const labelNodes = nodes.filter((d) => {
+      if (d.depth === 3) return arcLength(d) >= 5;
+      return arcLength(d) >= (MIN_ARC_PX[d.depth] ?? 999);
+    });
 
     gRef.current
       .selectAll<SVGTextElement, d3.HierarchyRectangularNode<HierarchyData>>("text.arc-label")
