@@ -394,14 +394,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
     const radius  = Math.min(width, height) / 2;
 
     // Depth-1: scale with radius (11px at radius≥275, 7px at mobile).
-    // Depth-2/3: scale with arc length so labels fit even tiny segments.
     const depth1FontBase = Math.max(7, Math.min(11, Math.round(radius / 25)));
-    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number => {
-      if (d.depth === 1) return depth1FontBase;
-      const arc = arcLength(d);
-      if (d.depth === 2) return arc >= 18 ? 9 : arc >= 10 ? 8 : 7;
-      return arc >= 14 ? 8 : 7; // depth 3
-    };
 
     d3.select(svgRef.current).attr("width", width).attr("height", height);
     gRef.current.attr("transform", `translate(${width / 2}, ${height / 2})`);
@@ -485,6 +478,23 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       : zoomedParty
       ? (partitionRoot.children?.find((d) => d.data.name === zoomedParty)?.descendants() ?? [])
       : partitionRoot.descendants().filter((d) => d.depth > 0);
+
+    // Depth-2/3 font: uniform within each parent group. Compute the smallest
+    // arc-length-driven size among all visible siblings, then apply it to all.
+    const parentFontSize = new Map<string, number>();
+    for (const d of nodes) {
+      if ((d.depth === 2 || d.depth === 3) && d.parent && arcLength(d) >= MIN_ARC_PX[d.depth]) {
+        const key = nodeKey(d.parent);
+        const a = arcLength(d);
+        const fs = d.depth === 2 ? (a >= 18 ? 9 : a >= 10 ? 8 : 7) : (a >= 14 ? 8 : 7);
+        parentFontSize.set(key, Math.min(parentFontSize.get(key) ?? 99, fs));
+      }
+    }
+    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number => {
+      if (d.depth === 1) return depth1FontBase;
+      if (d.parent) return parentFontSize.get(nodeKey(d.parent)) ?? (d.depth === 2 ? 9 : 8);
+      return d.depth === 2 ? 9 : 8;
+    };
 
     gRef.current
       .selectAll<SVGPathElement, d3.HierarchyRectangularNode<HierarchyData>>("path")
