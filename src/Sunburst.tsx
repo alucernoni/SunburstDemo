@@ -260,8 +260,9 @@ function enforceMinTickerArcs(
   }
 }
 
-// Minimum arc length (px) at midpoint radius required to show a label
-const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 20, 3: 14 };
+// Minimum arc length (px) at midpoint radius required to show a label.
+// Kept low so every section gets text; abbreviation + font-size scale handles fitting.
+const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 6, 3: 6 };
 
 const PARTY_ABBREV: Record<string, string> = {
   Democratic: "Dem.", Republican: "Rep.", Independent: "Ind.",
@@ -280,7 +281,7 @@ function getLabelText(d: d3.HierarchyRectangularNode<HierarchyData>): string {
     if (node.collapsed) return node.name; // "N others" — show as-is
     const { display, last } = parsePoliticianName(node.name);
     if (d.x1 - d.x0 > 1.5 * Math.PI) return display; // full name when zoomed
-    return last; // last name only on arc
+    return last; // labels are radial — last name fits in ring height even on mobile
   }
   if (d.depth === 3) return (d.data as unknown as TickerNode).name;
   return "";
@@ -310,9 +311,6 @@ function arcLength(d: d3.HierarchyRectangularNode<HierarchyData>): number {
   return ((d.y0 + d.y1) / 2) * (d.x1 - d.x0);
 }
 
-function getLabelFontSize(d: d3.HierarchyRectangularNode<HierarchyData>): number {
-  return d.depth === 1 ? 11 : d.depth === 2 ? 9 : 8;
-}
 
 function getLabelColor(_d: d3.HierarchyRectangularNode<HierarchyData>): string {
   return "rgba(255,255,255,0.88)";
@@ -395,11 +393,15 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
     const tooltip = tooltipRef.current;
     const radius  = Math.min(width, height) / 2;
 
-    // Depth-1 font: scale with radius (11px at radius≥275, 7px at mobile).
-    // No arc-length cap — getLabelText already abbreviates when arc is tiny.
+    // Depth-1: scale with radius (11px at radius≥275, 7px at mobile).
+    // Depth-2/3: scale with arc length so labels fit even tiny segments.
     const depth1FontBase = Math.max(7, Math.min(11, Math.round(radius / 25)));
-    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number =>
-      d.depth !== 1 ? getLabelFontSize(d) : depth1FontBase;
+    const labelFontSize = (d: d3.HierarchyRectangularNode<HierarchyData>): number => {
+      if (d.depth === 1) return depth1FontBase;
+      const arc = arcLength(d);
+      if (d.depth === 2) return arc >= 18 ? 9 : arc >= 10 ? 8 : 7;
+      return arc >= 14 ? 8 : 7; // depth 3
+    };
 
     d3.select(svgRef.current).attr("width", width).attr("height", height);
     gRef.current.attr("transform", `translate(${width / 2}, ${height / 2})`);
