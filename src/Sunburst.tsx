@@ -351,6 +351,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
   const centerRef   = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const prevAngles     = useRef<Map<string, ArcAngles>>(new Map());
   const touchTimerRef  = useRef<number | null>(null);
+  const touchStartPos  = useRef<{ x: number; y: number } | null>(null);
 
   // One-time setup: create the <g> and tooltip
   useEffect(() => {
@@ -503,6 +504,38 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
       return d.depth === 2 ? 9 : 8;
     };
 
+    // Shared zoom action — called by both click (desktop) and touchend (mobile).
+    // On mobile, touchstart calls preventDefault() to show the tooltip, which suppresses
+    // the synthetic click event; touchend.zoom re-implements the same logic for taps.
+    const handleArcAction = (d: d3.HierarchyRectangularNode<HierarchyData>) => {
+      if (d.depth === 1) {
+        if (zoomedPolitician) {
+          onPoliticianClick?.(null);
+        } else {
+          const partyName = (d.data as { name: string }).name;
+          onPartyClick?.(zoomedParty === partyName ? null : partyName);
+        }
+        return;
+      }
+      if (d.depth === 2 && isCollapsedPolitician(d)) {
+        const partyName = (d.parent?.data as { name: string })?.name;
+        if (partyName) onCollapsedPoliticiansClick?.(partyName);
+        return;
+      }
+      if (d.depth === 2 && !isCollapsedPolitician(d)) {
+        const politicianName = (d.data as unknown as PoliticianNode).name;
+        onPoliticianClick?.(zoomedPolitician === politicianName ? null : politicianName);
+        return;
+      }
+      if (isCollapsed(d)) {
+        const tickerNode = d.data as unknown as TickerNode;
+        const rawName = (d.parent?.data as unknown as PoliticianNode)?.name;
+        if (rawName && tickerNode.collapsed_tickers?.length) {
+          onShowTickerPanel?.(parsePoliticianName(rawName).display, tickerNode.collapsed_tickers);
+        }
+      }
+    };
+
     gRef.current
       .selectAll<SVGPathElement, d3.HierarchyRectangularNode<HierarchyData>>("path")
       .data(nodes, nodeKey)
@@ -543,36 +576,7 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         (exit) =>
           exit.transition().duration(prefersReducedMotion() ? 0 : 300).style("opacity", 0).remove()
       )
-      .on("click", (_event: MouseEvent, d) => {
-        if (d.depth === 1) {
-          if (zoomedPolitician) {
-            // Clicking the party ring while in politician zoom exits politician zoom
-            onPoliticianClick?.(null);
-          } else {
-            const partyName = (d.data as { name: string }).name;
-            onPartyClick?.(zoomedParty === partyName ? null : partyName);
-          }
-          return;
-        }
-        if (d.depth === 2 && isCollapsedPolitician(d)) {
-          const partyName = (d.parent?.data as { name: string })?.name;
-          if (partyName) onCollapsedPoliticiansClick?.(partyName);
-          return;
-        }
-        if (d.depth === 2 && !isCollapsedPolitician(d)) {
-          const politicianName = (d.data as unknown as PoliticianNode).name;
-          onPoliticianClick?.(zoomedPolitician === politicianName ? null : politicianName);
-          return;
-        }
-        if (isCollapsed(d)) {
-          // "N others" ticker clicked — open panel with full collapsed list
-          const tickerNode = d.data as unknown as TickerNode;
-          const rawName = (d.parent?.data as unknown as PoliticianNode)?.name;
-          if (rawName && tickerNode.collapsed_tickers?.length) {
-            onShowTickerPanel?.(parsePoliticianName(rawName).display, tickerNode.collapsed_tickers);
-          }
-        }
-      })
+      .on("click", (_event: MouseEvent, d) => handleArcAction(d))
       .on("mouseover", (event: MouseEvent, d) => {
         d3.select(event.currentTarget as Element)
           .attr("stroke", "#fff")
@@ -593,7 +597,8 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
         tooltip.style("opacity", 0);
       })
       .on("touchstart.tooltip", (event: TouchEvent, d) => {
-        event.preventDefault();
+        event.preventDefault(); // prevents synthetic click — zoom handled by touchend.zoom
+        touchStartPos.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
         if (touchTimerRef.current !== null) {
           clearTimeout(touchTimerRef.current);
           touchTimerRef.current = null;
@@ -608,7 +613,16 @@ export default function Sunburst({ data, totalPoliticians, width = 800, height =
           tooltip.style("opacity", 0).classed("touch-tooltip", false);
           touchTimerRef.current = null;
         }, 3000);
-      }, { passive: false } as AddEventListenerOptions);
+      }, { passive: false } as AddEventListenerOptions)
+      .on("touchend.zoom", (event: TouchEvent, d) => {
+        const start = touchStartPos.current;
+        touchStartPos.current = null;
+        if (!start) return;
+        const t = event.changedTouches[0];
+        if (!t) return;
+        if (Math.hypot(t.clientX - start.x, t.clientY - start.y) >= 10) return; // swipe, not tap
+        handleArcAction(d);
+      });
 
     // Labels
     // MIN_ARC_PX[1] = 0 so party labels always show; font-size closure handles fitting.
