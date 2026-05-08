@@ -261,8 +261,9 @@ function enforceMinTickerArcs(
 }
 
 // Minimum arc length (px) at midpoint radius required to show a label.
-// Kept low so every section gets text; abbreviation + font-size scale handles fitting.
-const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 6, 3: 6 };
+// Depth-3 floor = max font size (8px) + 4px buffer (2px each side) = 12px.
+// Tickers that don't meet this are collapsed into "N others" rather than cramped.
+const MIN_ARC_PX: Record<number, number> = { 1: 0, 2: 6, 3: 12 };
 
 const PARTY_ABBREV: Record<string, string> = {
   Democratic: "Dem.", Republican: "Rep.", Independent: "Ind.",
